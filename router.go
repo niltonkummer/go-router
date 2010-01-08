@@ -414,17 +414,30 @@ func (s *routerImpl) attach(cmd *command) {
 		}
 	}
 
+	//activate
+	//force broadcaster for system ids
 	idx := s.getSysIdIdx(endp.Id)
-	matches := new(vector.Vector)
+	if idx >= 0 { //sys ids
+		endp.start(s.defChanBufSize, BroadcastPolicy)
+	} else {
+		endp.start(s.defChanBufSize, s.dispPolicy)
+	}
 
-	//find bindings for endpoint
+	//create a chan *command to allow router mainLoop to wait for all bindings of the new endpoint to set up
+	//may remove this syncing in future
+	done := make(chan *command, DefCmdChanBufSize)
+	count := 0 //count how many outstanding
+
+	//setup bindings for endpoint
 	if s.matchType == ExactMatch {
 		switch endp.kind {
 		case senderType:
 			for _, recver := range ent.recvers {
 				if scope_match(endp.Id, recver.Id) {
 					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", endp.Id, recver.Id))
-					matches.Push(recver)
+					endp.attach(recver, done)
+					recver.attach(endp, done)
+					count += 2
 				}
 			}
 		case recverType:
@@ -435,7 +448,9 @@ func (s *routerImpl) attach(cmd *command) {
 						//s.LogError("enable for ", sender.Id);
 						s.notifier.setFlag(sender.Id, idx, true)
 					}
-					matches.Push(sender)
+					endp.attach(sender, done)
+					sender.attach(endp, done)
+					count += 2
 				}
 			}
 		}
@@ -448,7 +463,9 @@ func (s *routerImpl) attach(cmd *command) {
 						for _, recver := range ent2.recvers {
 							if scope_match(endp.Id, recver.Id) {
 								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", endp.Id, recver.Id))
-								matches.Push(recver)
+								endp.attach(recver, done)
+								recver.attach(endp, done)
+								count += 2
 							}
 						}
 					case recverType:
@@ -459,7 +476,9 @@ func (s *routerImpl) attach(cmd *command) {
 									s.notifier.setFlag(sender.Id, idx, true)
 								}
 								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
-								matches.Push(sender)
+								endp.attach(sender, done)
+								sender.attach(endp, done)
+								count += 2
 							}
 						}
 					}
@@ -473,50 +492,26 @@ func (s *routerImpl) attach(cmd *command) {
 		}
 	}
 
-	//finish updating routing table, spawn remaining work in another goroutine
+	//wait for all bindings to set up
+	count1 := count
+	for count > 0 {
+		<-done
+		count--
+	}
+	s.Log(LOG_INFO, fmt.Sprintf("router.attach all %v bindings for %v are done", count1, endp.Id))
 
-	go func() {
-		//activate
-		//force broadcaster for system ids
-		if idx >= 0 { //sys ids
-			endp.start(s.defChanBufSize, BroadcastPolicy)
-		} else {
-			endp.start(s.defChanBufSize, s.dispPolicy)
+	//notifier will send in a separate goroutine, so non-blocking here
+	if idx < 0 && endp.Id.Member() == MemberLocal { //not sys ids
+		switch endp.kind {
+		case senderType:
+			s.notifier.notifyPub(&IdChanInfo{Id: endp.Id, ChanType: endp.extIntf.Type().(*reflect.ChanType)})
+		case recverType:
+			s.notifier.notifySub(&IdChanInfo{Id: endp.Id, ChanType: endp.extIntf.Type().(*reflect.ChanType)})
 		}
+	}
 
-		//create a chan *command to allow router mainLoop to wait for all bindings of the new endpoint to set up
-		done := make(chan *command, DefCmdChanBufSize)
-		count := 0 //count how many outstanding
-
-		//setup bindings
-		for i := 0; i < matches.Len(); i++ {
-			peer := matches.At(i).(*Endpoint)
-			endp.attach(peer, done)
-			peer.attach(endp, done)
-			count += 2
-		}
-
-		//wait for all bindings to set up
-		count1 := count
-		for count > 0 {
-			<-done
-			count--
-		}
-		s.Log(LOG_INFO, fmt.Sprintf("router.attach all %v bindings for %v are done", count1, endp.Id))
-
-		//notifier will send in a separate goroutine, so non-blocking here
-		if idx < 0 && endp.Id.Member() == MemberLocal { //not sys ids
-			switch endp.kind {
-			case senderType:
-				s.notifier.notifyPub(&IdChanInfo{Id: endp.Id, ChanType: endp.extIntf.Type().(*reflect.ChanType)})
-			case recverType:
-				s.notifier.notifySub(&IdChanInfo{Id: endp.Id, ChanType: endp.extIntf.Type().(*reflect.ChanType)})
-			}
-		}
-
-		//release client
-		cmd.rspChan <- cmd
-	}()
+	//release client
+	cmd.rspChan <- cmd
 }
 
 func (s *routerImpl) detach(cmd *command) {
@@ -726,4 +721,3 @@ func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
 	router.FaultRaiser.Init(router, router.name, DefCmdChanBufSize)
 	return router
 }
- 
