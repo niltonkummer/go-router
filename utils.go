@@ -30,13 +30,37 @@ func (r *recverInBundle) mainLoop() {
 	dataChan := make(chan interface{}, r.bundle.router.defChanBufSize)
 	//use a goroutine to convert reflected chan into a chan interface{}
 	go func() {
-		for {
+		closedByMe := false
+		cont := true
+		for cont {
 			v := r.ch.Recv()
 			if r.ch.Closed() {
 				close(dataChan)
 				break
 			}
 			dataChan <- v.Interface()
+			if !closedByMe {
+				r.Lock()
+				num := r.numBindings
+				r.Unlock()
+				if num == 0 {
+					for {
+						//drain remaining msgs
+						vv := r.ch.TryRecv()
+						if r.ch.Closed() {
+							close(dataChan)
+							cont = false
+							break
+						}
+						if vv == nil {
+							r.ch.Close()
+							closedByMe = true
+							break
+						}
+						dataChan <- vv.Interface()
+					}
+				}
+			}
 		}
 	}()
 	cont := true
@@ -56,7 +80,8 @@ func (r *recverInBundle) mainLoop() {
 			r.numBindings = bv.Count
 			r.Unlock()
 			if r.numBindings == 0 {
-				//has to wait here a bit to allow remaining msgs come in
+				//yield to allow other send remaining msgs and 
+				//if no msgs pending, close chan to wake up forwarder goroutine
 				time.Sleep(1e6)
 				if r.ch.Len() == 0 {
 					r.ch.Close()
