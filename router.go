@@ -88,6 +88,7 @@ type routerImpl struct {
 	proxies        *vector.Vector
 	//for log/debug, if name != nil, debug is enabled
 	Logger
+	LogSink
 	FaultRaiser
 	name string
 }
@@ -158,31 +159,6 @@ func (s *routerImpl) IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdC
 	return (<-cmd.rspChan).data.(map[interface{}]*IdChanInfo)
 }
 
-func (s *routerImpl) parseBindChan(args ...) (bindChan chan BindEvent, err os.Error) {
-	av := reflect.NewValue(args).(*reflect.StructValue)
-	if av.NumField() > 0 {
-		cv, ok := av.Field(0).(*reflect.ChanValue)
-		if !ok {
-			err = os.ErrorString(errNotChan)
-			s.LogError(err)
-			return
-		}
-		icv := cv.Interface()
-		bindChan, ok = icv.(chan BindEvent)
-		if !ok {
-			err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
-			s.LogError(err)
-			return
-		}
-		if cap(bindChan) == 0 {
-			err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
-			s.LogError(err)
-			return
-		}
-	}
-	return
-}
-
 func (s *routerImpl) validateId(id Id) (err os.Error) {
 	if id == nil || (id.Scope() < ScopeGlobal || id.Scope() > ScopeLocal) ||
 		(id.Member() < MemberLocal || id.Member() > MemberRemote) {
@@ -203,12 +179,31 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 		s.LogError(err)
 		return
 	}
-	bindChan, err1 := s.parseBindChan(args)
-	if err1 != nil {
-		err = err1
-		s.LogError(err)
-		s.Raise(AttachSendFailure, err)
-		return
+	av := reflect.NewValue(args).(*reflect.StructValue)
+	var bindChan chan BindEvent
+	if av.NumField() > 0 {
+		switch cv := av.Field(0).(type) {
+		case *reflect.ChanValue:
+			icv := cv.Interface()
+			bindChan, ok = icv.(chan BindEvent)
+			if !ok {
+				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
+				s.LogError(err)
+				s.Raise(AttachSendFailure, err)
+				return
+			}
+			if cap(bindChan) == 0 {
+				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
+				s.LogError(err)
+				s.Raise(AttachSendFailure, err)
+				return
+			}
+		default:
+			err = os.ErrorString("invalid arguments to attach chan")
+			s.LogError(err)
+			s.Raise(AttachSendFailure, err)
+			return
+		}
 	}
 	endp := newEndpoint(id, senderType, ch)
 	endp.bindChan = bindChan
@@ -253,15 +248,40 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(AttachRecvFailure, err)
 		return
 	}
-	bindChan, err1 := s.parseBindChan(args)
-	if err1 != nil {
-		err = err1
-		s.LogError(err)
-		s.Raise(AttachRecvFailure, err)
-		return
+	av := reflect.NewValue(args).(*reflect.StructValue)
+	var bindChan chan BindEvent
+	var flag bool
+	if av.NumField() > 0 {
+		for i := 0; i < av.NumField(); i++ {
+			switch cv := av.Field(i).(type) {
+			case *reflect.ChanValue:
+				icv := cv.Interface()
+				bindChan, ok = icv.(chan BindEvent)
+				if !ok {
+					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
+					s.LogError(err)
+					s.Raise(AttachRecvFailure, err)
+					return
+				}
+				if cap(bindChan) == 0 {
+					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
+					s.LogError(err)
+					s.Raise(AttachRecvFailure, err)
+					return
+				}
+			case *reflect.BoolValue:
+				flag = cv.Get()
+			default:
+				err = os.ErrorString("invalid arguments to attach recv chan")
+				s.LogError(err)
+				s.Raise(AttachRecvFailure, err)
+				return
+			}
+		}
 	}
 	endp := newEndpoint(id, recverType, ch)
 	endp.bindChan = bindChan
+	endp.flag = flag
 	cmd := &command{}
 	cmd.kind = attach
 	cmd.data = endp
@@ -285,7 +305,9 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 				cont = false
 			}
 		}
-		ch.Close()
+		if !endp.flag {
+			ch.Close()
+		}
 	}()
 	return nil
 }
@@ -596,8 +618,9 @@ func (s *routerImpl) shutdown() {
 	}
 
 	//wait for console log goroutine to exit
-	s.CloseFaultRaiser()
-	s.CloseLogger()
+	s.FaultRaiser.Close()
+	s.Logger.Close()
+	s.LogSink.Close()
 
 	for _, ent2 := range s.routingTable {
 		for _, recver := range ent2.recvers {
@@ -721,7 +744,10 @@ func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
 	router.proxies = new(vector.Vector)
 	go router.mainLoop()
 	router.notifier = newNotifier(router)
-	router.Logger.Init(router, router.name, DefLogBufSize, consoleLogScope)
-	router.FaultRaiser.Init(router, router.name, DefCmdChanBufSize)
+	router.Logger.Init(router.SysID(RouterLogId), router, router.name, DefLogBufSize)
+	if consoleLogScope >= ScopeGlobal && consoleLogScope <= ScopeLocal {
+		router.LogSink.Init(router.NewSysID(RouterLogId, consoleLogScope), router)
+	}
+	router.FaultRaiser.Init(router.SysID(RouterFaultId), router, router.name, DefCmdChanBufSize, faultTypeString)
 	return router
 }

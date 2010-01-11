@@ -49,8 +49,8 @@ func NewStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *Stre
 		}
 		ln += "_stream"
 	}
-	s.Logger.Init(p.router, ln, DefLogBufSize, NumScope)
-	s.FaultRaiser.Init(p.router, ln, DefCmdChanBufSize)
+	s.Logger.Init(p.router.SysID(RouterLogId), p.router, ln, DefLogBufSize)
+	s.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln, DefCmdChanBufSize, faultTypeString)
 	return s
 }
 
@@ -71,8 +71,8 @@ func (s *Stream) closeImpl() {
 		//shutdown inputMainLoop
 		s.rwc.Close()
 		//close logger
-		s.CloseFaultRaiser()
-		s.CloseLogger()
+		s.FaultRaiser.Close()
+		s.Logger.Close()
 	}
 }
 

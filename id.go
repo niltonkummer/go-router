@@ -91,8 +91,8 @@ const (
 
 //some system level internal ids
 const (
-	SysLogId = NumSysIds + iota
-	SysFaultId
+	RouterLogId = NumSysIds + iota
+	RouterFaultId
 	NumSysInternalIds
 )
 

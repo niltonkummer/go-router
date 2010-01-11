@@ -23,8 +23,9 @@ type Endpoint struct {
 	extIntf    *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
 	Chan       chan interface{}   //sendChan for sender, recvChan for recver, internal to router
 	bindings   []*Endpoint        //binding_set
-	cmdChan    chan *command      //current for push dispacher, only sender uses cmdChan
-	dispatcher Dispatcher         //current for push dispacher, only sender uses dispatcher
+	cmdChan    chan *command
+	dispatcher Dispatcher //current for push dispacher, only sender uses dispatcher
+	flag       bool       //an internal flag, now only used to mark keep recv chan when all senders closed
 }
 
 func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue) *Endpoint {
@@ -168,8 +169,9 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 				for !(e.bindChan <- BindEvent{-1, n - 1}) { //chan full
 					<-e.bindChan //drop the oldest one
 				}
-			} else if e.kind == recverType {
-				//for recver, if all senders detached and no bindChan to notify the event
+			}
+			if e.kind == recverType {
+				//for recver, if all senders detached
 				//close data chan to notify possible pending goroutine
 				if len(e.bindings) == 0 {
 					close(e.Chan)

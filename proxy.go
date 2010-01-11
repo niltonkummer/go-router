@@ -65,7 +65,7 @@ type proxyImpl struct {
 	errChan chan os.Error
 }
 
-func NewProxy(r Router /*, name string, f Filter, t Translator*/) Proxy {
+func NewProxy(r Router) /*, name string, f Filter, t Translator*/ Proxy {
 	p := new(proxyImpl)
 	p.router = r.(*routerImpl)
 	//create import chans
@@ -89,8 +89,8 @@ func NewProxy(r Router /*, name string, f Filter, t Translator*/) Proxy {
 			ln = p.router.name + "_proxy"
 		}
 	}
-	p.Logger.Init(p.router, ln, DefLogBufSize, NumScope)
-	p.FaultRaiser.Init(p.router, ln, DefCmdChanBufSize)
+	p.Logger.Init(p.router.SysID(RouterLogId), p.router, ln, DefLogBufSize)
+	p.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln, DefCmdChanBufSize, faultTypeString)
 	return p
 }
 
@@ -141,8 +141,8 @@ func (p *proxyImpl) closeImpl() {
 		p.appRecvChans.Close()
 		p.appSendChans.Close()
 		//close logger
-		p.CloseFaultRaiser()
-		p.CloseLogger()
+		p.FaultRaiser.Close()
+		p.Logger.Close()
 	}
 	p.Log(LOG_INFO, "proxy closed")
 }

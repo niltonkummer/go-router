@@ -39,10 +39,9 @@ func main() {
 	go func() {
 		//subscribe to remote publications, so learn what subjects are created
 		pubChan := make(chan router.IdChanInfoMsg)
-		//attach a recv chan with bindChan, so that we know when senders detach and 
+		//attach a recv chan with flag true, so that we know when senders detach and
 		//this recv chan will not be closed when all senders detach
-		bindChan := make(chan router.BindEvent, 1)
-		rot.AttachRecvChan(rot.NewSysID(router.PubId, router.ScopeRemote), pubChan, bindChan)
+		rot.AttachRecvChan(rot.NewSysID(router.PubId, router.ScopeRemote), pubChan, true)
 		//stopChan to notify when all people leave a subject
 		stopChan := make(chan router.Id, 36)
 

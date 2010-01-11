@@ -10,7 +10,6 @@ import (
 	"os"
 	"fmt"
 	"sync"
-	"time"
 )
 
 //RecvChanBundle groups a set of recvChans together
@@ -19,7 +18,6 @@ type recverInBundle struct {
 	id          Id
 	ch          *reflect.ChanValue
 	bindChan    chan BindEvent
-	sync.Mutex  //to protect numBindings
 	numBindings int
 }
 
@@ -27,67 +25,15 @@ func (r *recverInBundle) Close() { r.ch.Close() }
 
 func (r *recverInBundle) mainLoop() {
 	r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward chan for %v start", r.id))
-	dataChan := make(chan interface{}, r.bundle.router.defChanBufSize)
-	//use a goroutine to convert reflected chan into a chan interface{}
-	go func() {
-		closedByMe := false
-		cont := true
-		for cont {
-			v := r.ch.Recv()
-			if r.ch.Closed() {
-				close(dataChan)
-				break
-			}
-			dataChan <- v.Interface()
-			if !closedByMe {
-				r.Lock()
-				num := r.numBindings
-				r.Unlock()
-				if num == 0 {
-					for {
-						//drain remaining msgs
-						vv := r.ch.TryRecv()
-						if r.ch.Closed() {
-							close(dataChan)
-							cont = false
-							break
-						}
-						if vv == nil {
-							r.ch.Close()
-							closedByMe = true
-							break
-						}
-						dataChan <- vv.Interface()
-					}
-				}
-			}
+	for {
+		v := r.ch.Recv()
+		if r.ch.Closed() {
+			r.bundle.router.Log(LOG_INFO, fmt.Sprintf("close proxy chan for %v", r.id))
+			r.bundle.OutChan <- GenericMsg{Id: r.id, Data: ChanCloseMsg{}}
+			break
 		}
-	}()
-	cont := true
-	for cont {
-		select {
-		case v := <-dataChan:
-			if closed(dataChan) {
-				r.bundle.router.Log(LOG_INFO, fmt.Sprintf("close proxy chan for %v", r.id))
-				r.bundle.OutChan <- GenericMsg{Id: r.id, Data: ChanCloseMsg{}}
-				cont = false
-			} else {
-				r.bundle.OutChan <- GenericMsg{Id: r.id, Data: v}
-			}
-			//r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward one msg for id %v: %v", r.id, v.Interface()))
-		case bv := <-r.bindChan:
-			r.Lock()
-			r.numBindings = bv.Count
-			r.Unlock()
-			if r.numBindings == 0 {
-				//yield to allow other send remaining msgs and 
-				//if no msgs pending, close chan to wake up forwarder goroutine
-				time.Sleep(1e6)
-				if r.ch.Len() == 0 {
-					r.ch.Close()
-				}
-			}
-		}
+		r.bundle.OutChan <- GenericMsg{Id: r.id, Data: v.Interface()}
+		//r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward one msg for id %v: %v", r.id, v.Interface()))
 	}
 	r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward chan goroutine for %v exit", r.id))
 }
@@ -127,14 +73,18 @@ func (rcb *RecvChanBundle) RecverExist(id Id) bool {
 }
 
 func (rcb *RecvChanBundle) BindingCount(id Id) int {
-	r, ok := rcb.recvChans[id.Key()]
+	s, ok := rcb.recvChans[id.Key()]
 	if !ok {
 		return -1
 	}
-	r.Lock()
-	num := r.numBindings
-	r.Unlock()
-	return num
+	for {
+		bv, ok := <-s.bindChan
+		if !ok {
+			break
+		}
+		s.numBindings = bv.Count
+	}
+	return s.numBindings
 }
 
 func (rcb *RecvChanBundle) AddRecver(id Id, chanType *reflect.ChanType) os.Error {
