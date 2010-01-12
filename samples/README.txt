@@ -13,5 +13,6 @@ a simple chat client/server:
   Send:
         will ask for "subject" and "message" strings which will be sent
 
-. each subject string will become an id in router, all chatcli joined the same 
-  subjects can send and recv all messages
+. each subject string will become an id in router
+. run multi chatcli and all chatcli joined the same subjects can chat with each other
+

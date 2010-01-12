@@ -31,7 +31,7 @@ func main() {
 	}
 	fmt.Println(l.Addr().String())
 
-	subjMap := make(map[interface{}]*Subject)
+	subjMap := make(map[string]*Subject)
 
 	rot := router.New(router.StrID(), 32, router.BroadcastPolicy /*, "chatsrv", router.ScopeLocal*/ )
 
@@ -39,41 +39,43 @@ func main() {
 	go func() {
 		//subscribe to remote publications, so learn what subjects are created
 		pubChan := make(chan router.IdChanInfoMsg)
-		//attach a recv chan with flag true, so that we know when senders detach and
+		//attach a recv chan with flag true, so that
 		//this recv chan will not be closed when all senders detach
 		rot.AttachRecvChan(rot.NewSysID(router.PubId, router.ScopeRemote), pubChan, true)
 		//stopChan to notify when all people leave a subject
-		stopChan := make(chan router.Id, 36)
+		stopChan := make(chan string, 36)
 
 		for {
 			select {
-			case id := <-stopChan:
-				subjMap[id.Key()] = nil, false
+			case idstr := <-stopChan:
+				subjMap[idstr] = nil, false
 			case pub := <-pubChan:
 				//process recved client publication of subjects
 				for _, v := range pub.Info {
-					subj, ok := subjMap[v.Id.Key()]
+					id := v.Id.(*router.StrId) //get the real id type
+					subj, ok := subjMap[id.Val]
 					if ok {
 						continue
 					}
-					fmt.Printf("add subject: %v\n", v.Id)
+					fmt.Printf("add subject: %v\n", id.Val)
 					//add a new subject with ScopeRemote, so that msgs are forwarded
 					//to peers in connected routers
-					id, _ := v.Id.Clone(router.ScopeRemote, router.MemberLocal)
+					id.ScopeVal = router.ScopeRemote
+					id.MemberVal = router.MemberLocal
 					subj = newSubject()
-					subjMap[id.Key()] = subj
+					subjMap[id.Val] = subj
 					//subscribe to new subjects, forward recved msgs to other
 					rot.AttachSendChan(id, subj.sendChan)
 					rot.AttachRecvChan(id, subj.recvChan)
 					//start forwarding
-					go func(id router.Id) {
+					go func(subjname string) {
 						for val := range subj.recvChan {
-							fmt.Printf("chatsrv forward: subject[%v], msg[%s]\n", id, val)
+							fmt.Printf("chatsrv forward: subject[%v], msg[%s]\n", subjname, val)
 							subj.sendChan <- val
 						}
-						stopChan <- id
-						fmt.Printf("chatsrv stop forwarding for : %v\n", id)
-					}(id)
+						stopChan <- subjname
+						fmt.Printf("chatsrv stop forwarding for : %v\n", subjname)
+					}(id.Val)
 				}
 			}
 		}
