@@ -40,9 +40,17 @@ type ConnInfoMsg struct {
 	SeedId   Id
 }
 
+type BindEventType int8
+
+const (
+	PeerAttach BindEventType = iota
+	PeerDetach
+	EndOfData
+)
+
 type BindEvent struct {
-	Op    int8 //+1 one attach, -1 one detach
-	Count int  //total attached
+	Type  BindEventType
+	Count int //total attached
 }
 
 type ChanCloseMsg struct{}

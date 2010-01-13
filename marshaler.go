@@ -271,7 +271,7 @@ type jsonDemarshaler struct {
 	lenBuf [10]byte
 }
 
-var JsonMarshaling MarshallingPolicy = jsonMarshallingPolicy(0)
+var JsonMarshaling MarshallingPolicy = jsonMarshallingPolicy(1)
 
 func (j jsonMarshallingPolicy) NewMarshaler(w io.Writer) Marshaler {
 	return &jsonMarshaler{w, new(bytes.Buffer)}

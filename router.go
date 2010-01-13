@@ -250,7 +250,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
 	var bindChan chan BindEvent
-	var flag bool
+	var flag bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 	if av.NumField() > 0 {
 		for i := 0; i < av.NumField(); i++ {
 			switch cv := av.Field(i).(type) {
@@ -281,7 +281,6 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 	}
 	endp := newEndpoint(id, recverType, ch)
 	endp.bindChan = bindChan
-	endp.flag = flag
 	cmd := &command{}
 	cmd.kind = attach
 	cmd.data = endp
@@ -300,14 +299,30 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		for cont {
 			v := <-endp.Chan
 			if !closed(endp.Chan) {
-				ch.Send(reflect.NewValue(v))
+				if _, ok1 := v.(ChanCloseMsg); ok1 {
+					if endp.bindChan != nil {
+						//if bindChan exist, user is monitoring bind status
+						//send EndOfData event and normally leave ext chan "ch" open
+						//only close it when flag is set
+						for !(endp.bindChan <- BindEvent{EndOfData, 0}) {
+							<-endp.bindChan
+						}
+						if flag {
+							ch.Close()
+						}
+					} else {
+						//since no bindChan, user code is not monitoring bind status
+						//close ext chan to notify potential pending goroutine
+						ch.Close()
+					}
+				} else {
+					ch.Send(reflect.NewValue(v))
+				}
 			} else {
 				cont = false
 			}
 		}
-		if !endp.flag {
-			ch.Close()
-		}
+		ch.Close()
 	}()
 	return nil
 }

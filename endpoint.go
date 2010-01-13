@@ -25,7 +25,6 @@ type Endpoint struct {
 	bindings   []*Endpoint        //binding_set
 	cmdChan    chan *command
 	dispatcher Dispatcher //current for push dispacher, only sender uses dispatcher
-	flag       bool       //an internal flag, now only used to mark keep recv chan when all senders closed
 }
 
 func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue) *Endpoint {
@@ -57,6 +56,7 @@ func (e *Endpoint) Close() {
 	}
 	e.extIntf.Close()
 	close(e.Chan)
+	close(e.cmdChan)
 	//e.cmdChan <- &command{kind:shutdown}
 }
 
@@ -82,10 +82,8 @@ func (e *Endpoint) handleCmd(cmd *command) (cont bool) {
 }
 
 func (e *Endpoint) recverLoop() {
-	cont := true
-	for cont {
-		cmd := <-e.cmdChan
-		cont = e.handleCmd(cmd)
+	for cmd := range e.cmdChan {
+		e.handleCmd(cmd)
 	}
 }
 
@@ -95,17 +93,29 @@ func (e *Endpoint) senderLoop() {
 		if len(e.bindings) == 0 {
 			// no recver, only wait for commands, so we can throttle sender
 			cmd := <-e.cmdChan
-			cont = e.handleCmd(cmd)
+			if !closed(e.cmdChan) {
+				cont = e.handleCmd(cmd)
+			} else {
+				cont = false
+			}
 		} else {
 			// there are recvers, handle both cmd and data input,
 			// and give cmdChan higher priority
 			select {
 			case cmd := <-e.cmdChan:
-				cont = e.handleCmd(cmd)
+				if !closed(e.cmdChan) {
+					cont = e.handleCmd(cmd)
+				} else {
+					cont = false
+				}
 			default:
 				select {
 				case cmd := <-e.cmdChan:
-					cont = e.handleCmd(cmd)
+					if !closed(e.cmdChan) {
+						cont = e.handleCmd(cmd)
+					} else {
+						cont = false
+					}
 				case v := <-e.Chan:
 					if !closed(e.Chan) {
 						e.dispatcher.Dispatch(v, e.bindings)
@@ -142,7 +152,7 @@ func (e *Endpoint) attachImpl(p *Endpoint, done chan *command) {
 	e.bindings[len0] = p
 	if e.bindChan != nil {
 		//KeepLatest non-blocking send
-		for !(e.bindChan <- BindEvent{1, len0 + 1}) { //chan full
+		for !(e.bindChan <- BindEvent{PeerAttach, len0 + 1}) { //chan full
 			<-e.bindChan //drop the oldest one
 		}
 	}
@@ -166,15 +176,15 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 			e.bindings = e.bindings[0 : n-1]
 			if e.bindChan != nil {
 				//KeepLatest non-blocking send
-				for !(e.bindChan <- BindEvent{-1, n - 1}) { //chan full
+				for !(e.bindChan <- BindEvent{PeerDetach, n - 1}) { //chan full
 					<-e.bindChan //drop the oldest one
 				}
 			}
 			if e.kind == recverType {
 				//for recver, if all senders detached
-				//close data chan to notify possible pending goroutine
+				//send ChanCloseMsg to notify possible pending goroutine
 				if len(e.bindings) == 0 {
-					close(e.Chan)
+					e.Chan <- ChanCloseMsg{}
 				}
 			}
 			return

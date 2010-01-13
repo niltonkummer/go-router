@@ -98,7 +98,7 @@ func (rcb *RecvChanBundle) AddRecver(id Id, chanType *reflect.ChanType) os.Error
 	rt := rcb.router
 	r.ch = reflect.MakeChan(chanType, rt.defChanBufSize)
 	r.bindChan = make(chan BindEvent, 1)
-	err := rt.AttachRecvChan(r.id, r.ch.Interface(), r.bindChan)
+	err := rt.AttachRecvChan(r.id, r.ch.Interface(), r.bindChan, true)
 	if err != nil {
 		return err
 	}

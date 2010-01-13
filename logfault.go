@@ -79,7 +79,7 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 	logger.logChan = make(chan *LogRecord, bufSize)
 	err := logger.router.AttachSendChan(id, logger.logChan, logger.bindEvtChan)
 	if err != nil {
-		log.Crash("failed to add logger for ", logger.source);
+		log.Crash("failed to add logger for ", logger.source)
 		return nil
 	}
 	return logger
@@ -117,8 +117,8 @@ func (l *logger) Close() {
 
 //a wrapper for embed
 type Logger struct {
-	router   *routerImpl
-	logger   *logger
+	router *routerImpl
+	logger *logger
 }
 
 func NewLogger(id Id, r Router, src string, bufSize int) *Logger {
@@ -157,23 +157,21 @@ type LogSink struct {
 	sinkExit chan bool
 }
 
-func NewLogSink(id Id, r Router) *LogSink {
-	return new(LogSink).Init(id, r)
-}
+func NewLogSink(id Id, r Router) *LogSink { return new(LogSink).Init(id, r) }
 
 func (l *LogSink) Init(id Id, r Router) *LogSink {
-			l.sinkExit = make(chan bool)
-			l.sinkChan = make(chan *LogRecord, DefLogBufSize)
-			l.runConsoleLogSink(id, r)
+	l.sinkExit = make(chan bool)
+	l.sinkChan = make(chan *LogRecord, DefLogBufSize)
+	l.runConsoleLogSink(id, r)
 	return l
 }
 
 func (l *LogSink) Close() {
-		if l.sinkChan != nil {
-			close(l.sinkChan)
-			//wait for sink gorutine to exit
-			<-l.sinkExit
-		}
+	if l.sinkChan != nil {
+		close(l.sinkChan)
+		//wait for sink gorutine to exit
+		<-l.sinkExit
+	}
 }
 
 func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
@@ -220,7 +218,7 @@ func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
 //Fault management
 
 //Fault types: faults under the same fault id can be further divided into diff types
-//here are fault types for router internal implementation. 
+//here are fault types for router internal implementation.
 //apps can have their own types, and app should provide its own func to map fault to string
 const (
 	IdTypeMismatch = iota
@@ -263,14 +261,14 @@ type FaultRecord struct {
 type faultRaiser struct {
 	bindEvtChan chan BindEvent
 	source      string
-	typeString  func(int)string
+	typeString  func(int) string
 	faultChan   chan *FaultRecord
 	router      *routerImpl
 	id          Id
 	caught      bool
 }
 
-func newfaultRaiser(id Id, r Router, src string, bufSize int, ts func(int)string) *faultRaiser {
+func newfaultRaiser(id Id, r Router, src string, bufSize int, ts func(int) string) *faultRaiser {
 	faultRaiser := new(faultRaiser)
 	faultRaiser.id = id
 	faultRaiser.router = r.(*routerImpl)
@@ -320,11 +318,11 @@ type FaultRaiser struct {
 	faultRaiser *faultRaiser
 }
 
-func NewFaultRaiser(id Id, r Router, src string, bufSize int, ts func(int)string) *FaultRaiser {
+func NewFaultRaiser(id Id, r Router, src string, bufSize int, ts func(int) string) *FaultRaiser {
 	return new(FaultRaiser).Init(id, r, src, bufSize, ts)
 }
 
-func (l *FaultRaiser) Init(id Id, r Router, src string, bufSize int, ts func(int)string) *FaultRaiser {
+func (l *FaultRaiser) Init(id Id, r Router, src string, bufSize int, ts func(int) string) *FaultRaiser {
 	l.router = r.(*routerImpl)
 	if len(src) > 0 {
 		l.faultRaiser = newfaultRaiser(id, r, src, bufSize, ts)
