@@ -65,7 +65,7 @@ type proxyImpl struct {
 	errChan chan os.Error
 }
 
-func NewProxy(r Router) /*, name string, f Filter, t Translator*/ Proxy {
+func NewProxy(r Router /*, name string, f Filter, t Translator*/) Proxy {
 	p := new(proxyImpl)
 	p.router = r.(*routerImpl)
 	//create import chans
