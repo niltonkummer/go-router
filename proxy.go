@@ -275,45 +275,21 @@ func (p *proxyImpl) ctrlMainLoop() {
 		case m := <-p.sysChans.pubSubInfo:
 			switch {
 			case m.Id.Match(r.SysID(PubId)):
-				_, err := p.handleLocalPubMsg(m)
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
+				_, err = p.handleLocalPubMsg(m)
 			case m.Id.Match(r.SysID(UnPubId)):
-				_, err := p.handleLocalUnPubMsg(m)
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
+				_, err = p.handleLocalUnPubMsg(m)
 			case m.Id.Match(r.SysID(SubId)):
-				_, err := p.handleLocalSubMsg(m)
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
+				_, err = p.handleLocalSubMsg(m)
 			case m.Id.Match(r.SysID(UnSubId)):
-				_, err := p.handleLocalUnSubMsg(m)
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
+				_, err = p.handleLocalUnSubMsg(m)
+			}
+			if err != nil {
+				//tell peer about fail
+				ci := ConnInfoMsg{Error: err}
+				p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
+				p.sysChans.SendConnInfo(ConnErrorId, ci)
+				p.LogError(err)
+				cont = false
 			}
 		case m := <-p.importConnChan:
 			switch {
@@ -330,49 +306,25 @@ func (p *proxyImpl) ctrlMainLoop() {
 		case m := <-p.importPubSubChan:
 			switch {
 			case m.Id.Match(r.SysID(PubId)):
-				_, err := p.handlePeerPubMsg(m)
+				_, err = p.handlePeerPubMsg(m)
 				p.sysChans.SendPubSubInfo(PubId, m.Data.(IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
 			case m.Id.Match(r.SysID(UnPubId)):
-				_, err := p.handlePeerUnPubMsg(m)
+				_, err = p.handlePeerUnPubMsg(m)
 				p.sysChans.SendPubSubInfo(UnPubId, m.Data.(IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
 			case m.Id.Match(r.SysID(SubId)):
-				_, err := p.handlePeerSubMsg(m)
+				_, err = p.handlePeerSubMsg(m)
 				p.sysChans.SendPubSubInfo(SubId, m.Data.(IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
 			case m.Id.Match(r.SysID(UnSubId)):
-				_, err := p.handlePeerUnSubMsg(m)
+				_, err = p.handlePeerUnSubMsg(m)
 				p.sysChans.SendPubSubInfo(UnSubId, m.Data.(IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					ci := ConnInfoMsg{Error: err}
-					p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
-					p.sysChans.SendConnInfo(ConnErrorId, ci)
-					p.LogError(err)
-					cont = false
-				}
+			}
+			if err != nil {
+				//tell peer about fail
+				ci := ConnInfoMsg{Error: err}
+				p.exportConnChan <- GenericMsg{Id: r.SysID(ConnErrorId), Data: ci}
+				p.sysChans.SendConnInfo(ConnErrorId, ci)
+				p.LogError(err)
+				cont = false
 			}
 		}
 		p.Log(LOG_INFO, "proxy finish one sys ctrl msg")
