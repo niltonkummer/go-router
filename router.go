@@ -13,7 +13,7 @@ import (
 	"io"
 )
 
-//some default config
+//Default size settings in router
 const (
 	DefLogBufSize      = 256
 	DefDataChanBufSize = 32
@@ -21,21 +21,27 @@ const (
 	DefBindingSetSize  = 8
 )
 
+//Router is the main access point to functionality. Applications will create an instance
+//of it thru router.New(...) and attach channels to it
 type Router interface {
 	//---- core api ----
-	//attach chans to id in router,
-	//with optional (chan BindEvent) telling when other ends connecting/disconn
+	//Attach chans to id in router,
+	//optional (chan BindEvent) serving two purposes:
+	//1. telling when other ends connecting/disconn
+	//2. in AttachRecvChan, telling router to keep recv chan open when all senders close
 	AttachSendChan(Id, interface{}, ...) os.Error
 	AttachRecvChan(Id, interface{}, ...) os.Error
 
-	//detach sendChan/recvChan from router
+	//Detach sendChan/recvChan from router
 	DetachChan(Id, interface{}) os.Error
 
-	//shutdown
+	//Shutdown router
 	Close()
 
-	//connect to another router
+	//Connect this router to another router. The connection can be disconnected by Proxy.Close()
+	//Connect to a local router
 	Connect(Router) (Proxy, Proxy, os.Error)
+	//Connect to a remote router thru io conn
 	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
 
 	//--- other utils ---
@@ -49,8 +55,8 @@ type Router interface {
 	IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdChanInfo
 }
 
+//The internal commands handled by router's main goroutine loop
 type commandType int
-
 const (
 	attach commandType = iota
 	detach
@@ -68,6 +74,9 @@ type command struct {
 	rspChan chan *command //response channel
 }
 
+//Major data structures for router:
+//1. tblEntry: an entry for each id in router
+//2. routerImpl: main data struct of router
 type tblEntry struct {
 	chanType *reflect.ChanType
 	id       Id
@@ -177,6 +186,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	if !ok {
 		err = os.ErrorString(errNotChan)
 		s.LogError(err)
+		s.Raise(AttachSendFailure, err)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
@@ -518,8 +528,8 @@ func (s *routerImpl) attach(cmd *command) {
 		endp.start(s.defChanBufSize, s.dispPolicy)
 	}
 
-	//finish updating routing table, spawn remaining work in another goroutine
-
+	//finished updating routing table, spawn remaining work 
+	//in another goroutine to avoid blocking router main goroutine
 	go func() {
 		//create a chan *command to allow router mainLoop to wait for all bindings of the new endpoint to set up
 		done := make(chan *command, DefCmdChanBufSize)
@@ -706,20 +716,21 @@ func (s *routerImpl) delProxyImpl(p Proxy) {
 	}
 }
 
+//Connect() connects this router to peer router, the real job is done inside Proxy
 func (r1 *routerImpl) Connect(r2 Router) (p1, p2 Proxy, err os.Error) {
-	p1 = NewProxy(r1)
-	p2 = NewProxy(r2)
+	p1 = NewProxy(r1, "", nil, nil)
+	p2 = NewProxy(r2, "", nil, nil)
 	err = p1.Connect(p2)
 	return
 }
 
 func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) (p Proxy, err os.Error) {
-	p = NewProxy(r)
+	p = NewProxy(r, "", nil, nil)
 	err = p.ConnectRemote(rwc, mar)
 	return
 }
 
-
+//New is router constructor
 func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
 	//parse optional router name and flag for enable console logging
 	var name string

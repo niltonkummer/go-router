@@ -49,6 +49,10 @@ type proxyImpl struct {
 	sysChans     *sysChans
 	appSendChans *SendChanBundle //send to local router
 	appRecvChans *RecvChanBundle //recv from local router
+	forwardAppDataChan chan GenericMsg
+	//filter & translator
+	filter IdFilter
+	translator IdTranslator
 	//cache of export/import ids at proxy
 	exportSendIds map[interface{}]*IdChanInfo //exported send ids, global publish
 	exportRecvIds map[interface{}]*IdChanInfo //exported recv ids, global subscribe
@@ -65,9 +69,12 @@ type proxyImpl struct {
 	errChan chan os.Error
 }
 
-func NewProxy(r Router /*, name string, f Filter, t Translator*/) Proxy {
+func NewProxy(r Router, name string, f IdFilter, t IdTranslator) Proxy {
 	p := new(proxyImpl)
 	p.router = r.(*routerImpl)
+	p.name = name
+	p.filter = f
+	p.translator = t
 	//create import chans
 	p.myCmdChan = make(chan peerCommand, DefCmdChanBufSize)
 	p.exportConnChan = make(chan GenericMsg, p.router.defChanBufSize)
@@ -76,7 +83,18 @@ func NewProxy(r Router /*, name string, f Filter, t Translator*/) Proxy {
 	//chans to local router
 	p.sysChans = newSysChans(p)
 	p.appSendChans = NewSendChanBundle(p.router, ScopeLocal, MemberRemote)
-	p.appRecvChans = NewRecvChanBundle(p.router, ScopeLocal, MemberRemote, p.exportAppDataChan)
+	if p.translator == nil {
+		p.appRecvChans = NewRecvChanBundle(p.router, ScopeLocal, MemberRemote, p.exportAppDataChan)
+	} else {
+		p.forwardAppDataChan = make(chan GenericMsg, p.router.defChanBufSize)
+		p.appRecvChans = NewRecvChanBundle(p.router, ScopeLocal, MemberRemote, p.forwardAppDataChan)
+		//start outgoing id translation goroutine
+		go func() {
+			for v := range p.forwardAppDataChan {
+				p.exportAppDataChan <- GenericMsg{p.translator.TranslateOutward(v.Id), v.Data}
+			}
+		}()
+	}
 	//cache: only need to create import cache, since export cache are queried/returned from router
 	p.importSendIds = make(map[interface{}]*IdChanInfo)
 	p.importRecvIds = make(map[interface{}]*IdChanInfo)
@@ -140,6 +158,10 @@ func (p *proxyImpl) closeImpl() {
 		p.sysChans.Close()
 		p.appRecvChans.Close()
 		p.appSendChans.Close()
+		//notify outgoing translation goroutine to exit
+		if p.forwardAppDataChan != nil {
+			close(p.forwardAppDataChan)
+		}
 		//close logger
 		p.FaultRaiser.Close()
 		p.Logger.Close()
@@ -336,13 +358,18 @@ func (p *proxyImpl) dataMainLoop() {
 	p.Log(LOG_INFO, "-- dataMainLoop start")
 	for {
 		p.Log(LOG_INFO, "proxy wait for another app msg")
-		m := <-p.importAppDataChan //put app data chan at very last
+		m := <-p.importAppDataChan
 		if closed(p.importAppDataChan) {
 			p.Log(LOG_INFO, "proxy importAppDataChan closed")
 			break
 		}
 		p.Log(LOG_INFO, "proxy dataMainLoop recv/forward app msg")
-		err := p.appSendChans.Send(m.Id, m.Data)
+		var err os.Error
+		if p.translator != nil {
+			err = p.appSendChans.Send(p.translator.TranslateInward(m.Id), m.Data)
+		} else {
+			err = p.appSendChans.Send(m.Id, m.Data)
+		}
 		if err != nil {
 			p.LogError(err)
 		}
@@ -416,6 +443,10 @@ func (p *proxyImpl) handleLocalSubMsg(m GenericMsg) (num int, err os.Error) {
 	flags := make([]bool, len(sInfo))
 	for i, sub := range sInfo {
 		p.Log(LOG_INFO, fmt.Sprintf("handleLocalSubMsg: %v", sub.Id))
+		if p.filter != nil && p.filter.BlockInward(sub.Id) {
+			flags[i] = true
+			continue
+		}
 		_, ok := p.exportRecvIds[sub.Id.Key()]
 		if ok {
 			flags[i] = true
@@ -443,14 +474,32 @@ func (p *proxyImpl) handleLocalSubMsg(m GenericMsg) (num int, err os.Error) {
 		num++
 	}
 	if num > 0 {
-		if num == len(sInfo) {
-			p.exportPubSubChan <- m
+		if p.translator == nil {
+			if num == len(sInfo) {
+				p.exportPubSubChan <- m
+			} else {
+				sInfo2 := make([]*IdChanInfo, num)
+				cnt := 0
+				for i, sub := range sInfo {
+					if !flags[i] {
+						sInfo2[cnt] = sub
+						cnt++
+					}
+					if cnt == num {
+						break
+					}
+				}
+				p.exportPubSubChan <- GenericMsg{Id: m.Id, Data: IdChanInfoMsg{Info: sInfo2}}
+			}
 		} else {
 			sInfo2 := make([]*IdChanInfo, num)
 			cnt := 0
 			for i, sub := range sInfo {
 				if !flags[i] {
-					sInfo2[cnt] = sub
+					sInfo2[cnt] = new(IdChanInfo)
+					sInfo2[cnt].Id = p.translator.TranslateOutward(sub.Id)
+					sInfo2[cnt].ChanType = sub.ChanType
+					sInfo2[cnt].ElemType = sub.ElemType
 					cnt++
 				}
 				if cnt == num {
@@ -508,14 +557,32 @@ func (p *proxyImpl) handleLocalUnSubMsg(m GenericMsg) (num int, err os.Error) {
 		num++
 	}
 	if num > 0 {
-		if num == len(sInfo) {
-			p.exportPubSubChan <- m
+		if p.translator == nil {
+			if num == len(sInfo) {
+				p.exportPubSubChan <- m
+			} else {
+				sInfo2 := make([]*IdChanInfo, num)
+				cnt := 0
+				for i, sub := range sInfo {
+					if !flags[i] {
+						sInfo2[cnt] = sub
+						cnt++
+					}
+					if cnt == num {
+						break
+					}
+				}
+				p.exportPubSubChan <- GenericMsg{Id: m.Id, Data: IdChanInfoMsg{Info: sInfo2}}
+			}
 		} else {
 			sInfo2 := make([]*IdChanInfo, num)
 			cnt := 0
 			for i, sub := range sInfo {
 				if !flags[i] {
-					sInfo2[cnt] = sub
+					sInfo2[cnt] = new(IdChanInfo)
+					sInfo2[cnt].Id = p.translator.TranslateOutward(sub.Id)
+					sInfo2[cnt].ChanType = sub.ChanType
+					sInfo2[cnt].ElemType = sub.ElemType
 					cnt++
 				}
 				if cnt == num {
@@ -537,6 +604,10 @@ func (p *proxyImpl) handleLocalPubMsg(m GenericMsg) (num int, err os.Error) {
 	flags := make([]bool, len(pInfo))
 	for i, pub := range pInfo {
 		p.Log(LOG_INFO, fmt.Sprintf("handleLocalPubMsg: %v", pub.Id))
+		if p.filter != nil && p.filter.BlockOutward(pub.Id) {
+			flags[i] = true
+			continue
+		}
 		_, ok := p.exportSendIds[pub.Id.Key()]
 		if ok {
 			flags[i] = true
@@ -557,14 +628,32 @@ func (p *proxyImpl) handleLocalPubMsg(m GenericMsg) (num int, err os.Error) {
 		num++
 	}
 	if num > 0 {
-		if num == len(pInfo) {
-			p.exportPubSubChan <- m
+		if p.translator == nil {
+			if num == len(pInfo) {
+				p.exportPubSubChan <- m
+			} else {
+				pInfo2 := make([]*IdChanInfo, num)
+				cnt := 0
+				for i, pub := range pInfo {
+					if !flags[i] {
+						pInfo2[cnt] = pub
+						cnt++
+					}
+					if cnt == num {
+						break
+					}
+				}
+				p.exportPubSubChan <- GenericMsg{Id: m.Id, Data: pInfo2}
+			}
 		} else {
 			pInfo2 := make([]*IdChanInfo, num)
 			cnt := 0
 			for i, pub := range pInfo {
 				if !flags[i] {
-					pInfo2[cnt] = pub
+					pInfo2[cnt] = new(IdChanInfo)
+					pInfo2[cnt].Id = p.translator.TranslateOutward(pub.Id)
+					pInfo2[cnt].ChanType = pub.ChanType
+					pInfo2[cnt].ElemType = pub.ElemType
 					cnt++
 				}
 				if cnt == num {
@@ -573,19 +662,6 @@ func (p *proxyImpl) handleLocalPubMsg(m GenericMsg) (num int, err os.Error) {
 			}
 			p.exportPubSubChan <- GenericMsg{Id: m.Id, Data: pInfo2}
 		}
-		/* !!! dont do this now, wait for peerSub to set it up
-		//need to send out Pub info to peer first before the following AddRecver, so that at peer
-		//the Send forward bindings is set up before data comes
-		for i, pub := range pInfo {
-			if !flags[i] {
-				for _, sub := range p.importRecvIds {
-					if pub.Id.Match(sub.Id) {
-						p.appRecvChans.AddRecver(sub.Id, sub.ChanType)
-					}
-				}
-			}
-		}
-		*/
 	}
 	return
 }
@@ -645,14 +721,32 @@ func (p *proxyImpl) handleLocalUnPubMsg(m GenericMsg) (num int, err os.Error) {
 		num++
 	}
 	if num > 0 {
-		if num == len(pInfo) {
-			p.exportPubSubChan <- m
+		if p.translator == nil {
+			if num == len(pInfo) {
+				p.exportPubSubChan <- m
+			} else {
+				pInfo2 := make([]*IdChanInfo, num)
+				cnt := 0
+				for i, pub := range pInfo {
+					if !flags[i] {
+						pInfo2[cnt] = pub
+						cnt++
+					}
+					if cnt == num {
+						break
+					}
+				}
+				p.exportPubSubChan <- GenericMsg{Id: m.Id, Data: pInfo2}
+			}
 		} else {
 			pInfo2 := make([]*IdChanInfo, num)
 			cnt := 0
 			for i, pub := range pInfo {
 				if !flags[i] {
-					pInfo2[cnt] = pub
+					pInfo2[cnt] = new(IdChanInfo)
+					pInfo2[cnt].Id = p.translator.TranslateOutward(pub.Id)
+					pInfo2[cnt].ChanType = pub.ChanType
+					pInfo2[cnt].ElemType = pub.ElemType
 					cnt++
 				}
 				if cnt == num {
@@ -673,7 +767,13 @@ func (p *proxyImpl) handlePeerSubMsg(m GenericMsg) (num int, err os.Error) {
 	}
 	pInfo := make([]*IdChanInfo, len(sInfo))
 	for _, sub := range sInfo {
+		if p.translator != nil {
+			sub.Id = p.translator.TranslateInward(sub.Id)
+		}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerSubMsg: %v", sub.Id))
+		if p.filter != nil && p.filter.BlockOutward(sub.Id) {
+			continue
+		}
 		//for peerSub, one special case is for localPub round-trip,
 		//in this case, importRecvIds may already have it
 		//update import cache
@@ -698,10 +798,17 @@ func (p *proxyImpl) handlePeerSubMsg(m GenericMsg) (num int, err os.Error) {
 					p.appRecvChans.AddRecver(sub.Id, sub.ChanType)
 					p.Log(LOG_INFO, fmt.Sprintf("handlePeerSubMsg, add recver for: %v", sub.Id))
 				} else {
-					pInfo[num] = pub
+					if p.translator == nil {
+						pInfo[num] = pub
+					} else {
+						pInfo[num] = new(IdChanInfo)
+						pInfo[num].Id = p.translator.TranslateOutward(pub.Id)
+						pInfo[num].ChanType = pub.ChanType
+						pInfo[num].ElemType = pub.ElemType						
+					}
 					num++
 				}
-
+				break
 			}
 		}
 	}
@@ -719,6 +826,9 @@ func (p *proxyImpl) handlePeerUnSubMsg(m GenericMsg) (num int, err os.Error) {
 		return
 	}
 	for _, sub := range sInfo {
+		if p.translator != nil {
+			sub.Id = p.translator.TranslateInward(sub.Id)
+		}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerUnSubMsg: %v", sub.Id))
 		//update import cache
 		p.importRecvIds[sub.Id.Key()] = sub, false
@@ -737,7 +847,13 @@ func (p *proxyImpl) handlePeerPubMsg(m GenericMsg) (num int, err os.Error) {
 	}
 	sInfo := make([]*IdChanInfo, len(pInfo))
 	for _, pub := range pInfo {
+		if p.translator != nil {
+			pub.Id = p.translator.TranslateInward(pub.Id)
+		}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerPubMsg: %v", pub.Id))
+		if p.filter != nil && p.filter.BlockInward(pub.Id) {
+			continue
+		}
 		//update import cache
 		if p.appSendChans.SenderExist(pub.Id) {
 			continue
@@ -753,9 +869,16 @@ func (p *proxyImpl) handlePeerPubMsg(m GenericMsg) (num int, err os.Error) {
 					p.LogError(err)
 					return
 				}
-				sInfo[num] = sub
+				sInfo[num] = new(IdChanInfo)
+				if p.translator != nil {
+					sInfo[num].Id = p.translator.TranslateOutward(sub.Id)
+				} else {
+					sInfo[num].Id = sub.Id
+				}
+				sInfo[num].ChanType = sub.ChanType
+				sInfo[num].ElemType = sub.ElemType
 				//set special scope to mark sender is ready
-				sub.Id, _ = sub.Id.Clone(NumScope, MemberLocal)
+				sInfo[num].Id, _ = sInfo[num].Id.Clone(NumScope, MemberLocal)
 				num++
 				p.appSendChans.AddSender(pub.Id, pub.ChanType)
 			}
@@ -776,6 +899,9 @@ func (p *proxyImpl) handlePeerUnPubMsg(m GenericMsg) (num int, err os.Error) {
 		return
 	}
 	for _, pub := range pInfo {
+		if p.translator != nil {
+			pub.Id = p.translator.TranslateInward(pub.Id)
+		}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerUnPubMsg: %v", pub.Id))
 		//update import cache
 		p.importSendIds[pub.Id.Key()] = pub, false
@@ -801,12 +927,19 @@ func (p *proxyImpl) initSubInfoMsg() IdChanInfoMsg {
 	info := make([]*IdChanInfo, num)
 	idx := 0
 	for _, v := range p.exportRecvIds {
+		if p.filter != nil && p.filter.BlockInward(v.Id) {
+			continue
+		}
 		info[idx] = new(IdChanInfo)
-		info[idx].Id = v.Id
+		if p.translator != nil {
+			info[idx].Id = p.translator.TranslateOutward(v.Id)
+		} else {
+			info[idx].Id = v.Id
+		}
 		info[idx].ChanType = v.ChanType
 		idx++
 	}
-	return IdChanInfoMsg{Info: info}
+	return IdChanInfoMsg{Info: info[0:idx]}
 }
 
 func (p *proxyImpl) initPubInfoMsg() IdChanInfoMsg {
@@ -814,12 +947,20 @@ func (p *proxyImpl) initPubInfoMsg() IdChanInfoMsg {
 	info := make([]*IdChanInfo, num)
 	idx := 0
 	for _, v := range p.exportSendIds {
+		if p.filter != nil && p.filter.BlockOutward(v.Id) {
+			continue
+		}
 		info[idx] = new(IdChanInfo)
+		if p.translator != nil {
+			info[idx].Id = p.translator.TranslateOutward(v.Id)
+		} else {
+			info[idx].Id = v.Id
+		}
 		info[idx].Id = v.Id
 		info[idx].ChanType = v.ChanType
 		idx++
 	}
-	return IdChanInfoMsg{Info: info}
+	return IdChanInfoMsg{Info: info[0:idx]}
 }
 
 //utils:

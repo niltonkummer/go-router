@@ -19,6 +19,7 @@ GOFILES=\
 	utils.go\
 	marshaler.go\
 	stream.go\
+	filtrans.go\
 
 # test files for this package
 GOTESTFILES=
