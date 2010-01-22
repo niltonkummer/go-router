@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -10,7 +11,8 @@ import (
 	"os"
 )
 
-type ChanElemTypeData struct {
+//store marshaled information about ChanType
+type chanElemTypeData struct {
 	//full name of elem type: pkg_path.data_type
 	FullName string
 	//the following should be string encoding of the elem type
@@ -19,21 +21,25 @@ type ChanElemTypeData struct {
 	TypeEncoding string
 }
 
+//a message struct holding information about id and its associated ChanType
 type IdChanInfo struct {
 	Id       Id
 	ChanType *reflect.ChanType
-	ElemType *ChanElemTypeData
+	ElemType *chanElemTypeData
 }
 
+//a message struct for propagating router's namespace changes (chan attachments or detachments)
 type IdChanInfoMsg struct {
 	Info []*IdChanInfo
 }
 
-type GenericMsg struct {
+//the generic internal message
+type genericMsg struct {
 	Id   Id
 	Data interface{}
 }
 
+//a message struct containing information about remote router connection
 type ConnInfoMsg struct {
 	ConnInfo string
 	Error    os.Error
@@ -48,9 +54,13 @@ const (
 	EndOfData
 )
 
+//a message struct containing information for peer (sender/recver) binding/connection.
+//sent by router whenever peer attached or detached.
+//   Type:  the type of event just happened: PeerAttach/PeerDetach/EndOfData
+//   Count: how many peers are still bound now
 type BindEvent struct {
 	Type  BindEventType
 	Count int //total attached
 }
 
-type ChanCloseMsg struct{}
+type chanCloseMsg struct{}

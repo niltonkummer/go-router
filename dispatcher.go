@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -10,20 +11,22 @@ import (
 	"time"
 )
 
-//a dispatcher generator
+//DispatchPolicy is used to generate concrete dispatcher instances.
+//For the kind of dispatcher which has no internal state, the same instance
+//can be returned.
 type DispatchPolicy interface {
 	NewDispatcher() Dispatcher
 }
 
-//all dispatchers should implement this interface
+//Dispatcher is the common interface of all dispatchers
 type Dispatcher interface {
-	Dispatch(v interface{}, recvers []*Endpoint)
+	Dispatch(v interface{}, recvers []*endpoint)
 }
 
-//a wrapper for plain dispatch function
-type DispatchFunc func(v interface{}, recvers []*Endpoint)
+//DispatchFunc is a wrapper to convert a plain function into a dispatcher
+type DispatchFunc func(v interface{}, recvers []*endpoint)
 
-func (f DispatchFunc) Dispatch(v interface{}, recvers []*Endpoint) {
+func (f DispatchFunc) Dispatch(v interface{}, recvers []*endpoint) {
 	f(v, recvers)
 }
 
@@ -38,8 +41,8 @@ func (f PolicyFunc) NewDispatcher() Dispatcher {
  broadcast, roundrobin, etc
 */
 
-//simple broadcast is a plain function
-func Broadcast(v interface{}, recvers []*Endpoint) {
+//Simple broadcast is a plain function
+func Broadcast(v interface{}, recvers []*endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			rc.Chan <- v
@@ -47,16 +50,17 @@ func Broadcast(v interface{}, recvers []*Endpoint) {
 	}
 }
 
+//BroadcastPolicy is used to generate broadcast dispatcher instances
 var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })
 
-//round robin is a object maintaining its state
+//Roundrobin dispatcher will keep the "next" index as its state
 type Roundrobin struct {
 	next int
 }
 
 func NewRoundrobin() *Roundrobin { return &Roundrobin{0} }
 
-func (r *Roundrobin) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *Roundrobin) Dispatch(v interface{}, recvers []*endpoint) {
 	start := r.next
 	for {
 		rc := recvers[r.next]
@@ -71,16 +75,17 @@ func (r *Roundrobin) Dispatch(v interface{}, recvers []*Endpoint) {
 	}
 }
 
+//RoundRobinPolicy is ued to generate roundrobin dispatchers
 var RoundRobinPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return NewRoundrobin() })
 
-//random dispatcher
+//Random dispatcher
 type RandomDispatcher rand.Rand
 
 func NewRandomDispatcher() *RandomDispatcher {
 	return (*RandomDispatcher)(rand.New(rand.NewSource(time.Seconds())))
 }
 
-func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*Endpoint) {
+func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*endpoint) {
 	for {
 		ind := ((*rand.Rand)(rd)).Intn(len(recvers))
 		rc := recvers[ind]
@@ -91,6 +96,7 @@ func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*Endpoint) {
 	}
 }
 
+//RandomPolicy is used to generate random dispatchers
 var RandomPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return NewRandomDispatcher() })
 
 /*
@@ -99,6 +105,7 @@ var RandomPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return NewRando
  * real world dispatchers can be still more involving than this
  */
 
+/*
 //TimeoutDropBroadcaster: when sending to some recv channels times out, give up and keep the old values
 type TimeoutDropBroadcaster struct {
 	timeNs int64 //timeout in nano seconds
@@ -108,7 +115,7 @@ func NewTimeoutDropBroadcaster(to int64) *TimeoutDropBroadcaster {
 	return &TimeoutDropBroadcaster{to}
 }
 
-func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -152,7 +159,7 @@ func (r *TimeoutReportBroadcaster) SendAndKeepLatest(to *TimeoutEvent) {
 	}
 }
 
-func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -170,7 +177,7 @@ func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) 
 		}
 	}
 }
-
+*/
 /*
  * KeepLatestBroadcaster: when sending value to a recv chan times out, remove the oldest
  * values from recv chan to give space to new value
@@ -181,6 +188,7 @@ func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) 
 //so sender will never block
 //just need the following type as a warpper to add the special Send method
 //to normal buffered chan, recver will use normal channel recv operator
+/*
 type KeepLatestChan chan interface{}
 
 func (c KeepLatestChan) Send(v interface{}) {
@@ -197,7 +205,7 @@ func NewKeepLatestBroadcaster(to int64) *KeepLatestBroadcaster {
 	return &KeepLatestBroadcaster{to}
 }
 
-func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -211,3 +219,4 @@ func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 		}
 	}
 }
+*/

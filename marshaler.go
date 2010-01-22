@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -17,14 +18,17 @@ import (
 	"reflect"
 )
 
+//the common interface of all marshaler such as GobMarshaler and JsonMarshaler
 type Marshaler interface {
 	Marshal(interface{}) os.Error
 }
 
+//the common interface of all demarshaler such as GobDemarshaler and JsonDemarshaler
 type Demarshaler interface {
 	Demarshal(interface{}, reflect.Value) os.Error
 }
 
+//the common interface of all Marshaling policy such as GobMarshaling and JsonMarshaling
 type MarshallingPolicy interface {
 	NewMarshaler(io.Writer) Marshaler
 	NewDemarshaler(io.Reader) Demarshaler
@@ -36,6 +40,7 @@ type gobMarshallingPolicy byte
 type gobMarshaler gob.Encoder
 type gobDemarshaler gob.Decoder
 
+//use package "gob" for marshaling
 var GobMarshaling MarshallingPolicy = gobMarshallingPolicy(0)
 
 func (g gobMarshallingPolicy) NewMarshaler(w io.Writer) Marshaler {
@@ -50,10 +55,10 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 	v := reflect.Indirect(reflect.NewValue(e))
 	switch v := v.(type) {
 	case *reflect.BoolValue:
-		w := BoolWrapper{v.Get()}
+		w := boolWrapper{v.Get()}
 		return ((*gob.Encoder)(gm)).Encode(w)
 	case *reflect.IntValue:
-		w := IntWrapper{v.Get()}
+		w := intWrapper{v.Get()}
 		return ((*gob.Encoder)(gm)).Encode(w)
 	/*
 		case *reflect.Int8Value:
@@ -68,14 +73,14 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 		case *reflect.UintptrValue:
 	*/
 	case *reflect.FloatValue:
-		w := FloatWrapper{v.Get()}
+		w := floatWrapper{v.Get()}
 		return ((*gob.Encoder)(gm)).Encode(w)
 	/*
 		case *reflect.Float32Value:
 		case *reflect.Float64Value:
 	*/
 	case *reflect.StringValue:
-		w := StrWrapper{v.Get()}
+		w := strWrapper{v.Get()}
 		return ((*gob.Encoder)(gm)).Encode(w)
 	/*
 		case *reflect.ArrayValue:
@@ -84,7 +89,7 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 	case *reflect.StructValue:
 		switch e1 := e.(type) {
 		case ConnInfoMsg:
-			if err := ((*gob.Encoder)(gm)).Encode(BoolWrapper{e1.SeedId != nil}); err != nil {
+			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.SeedId != nil}); err != nil {
 				return err
 			}
 			if e1.SeedId != nil {
@@ -92,26 +97,26 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 					return err
 				}
 			}
-			if err := ((*gob.Encoder)(gm)).Encode(BoolWrapper{e1.Error != nil}); err != nil {
+			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.Error != nil}); err != nil {
 				return err
 			}
 			if e1.Error != nil {
-				if err := ((*gob.Encoder)(gm)).Encode(StrWrapper{e1.Error.String()}); err != nil {
+				if err := ((*gob.Encoder)(gm)).Encode(strWrapper{e1.Error.String()}); err != nil {
 					return err
 				}
 			}
-			if err := ((*gob.Encoder)(gm)).Encode(BoolWrapper{len(e1.ConnInfo) > 0}); err != nil {
+			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{len(e1.ConnInfo) > 0}); err != nil {
 				return err
 			}
 			if len(e1.ConnInfo) > 0 {
-				if err := ((*gob.Encoder)(gm)).Encode(StrWrapper{e1.ConnInfo}); err != nil {
+				if err := ((*gob.Encoder)(gm)).Encode(strWrapper{e1.ConnInfo}); err != nil {
 					return err
 				}
 			}
 			return nil
 		case IdChanInfoMsg:
 			num := len(e1.Info)
-			w := &IntWrapper{num}
+			w := &intWrapper{num}
 			if err := ((*gob.Encoder)(gm)).Encode(w); err != nil {
 				return err
 			}
@@ -120,7 +125,7 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 					return err
 				}
 				if v.ElemType == nil {
-					v.ElemType = new(ChanElemTypeData)
+					v.ElemType = new(chanElemTypeData)
 					elemType := v.ChanType.Elem()
 					v.ElemType.FullName = elemType.PkgPath() + "." + elemType.Name()
 				}
@@ -150,13 +155,13 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 	v := reflect.Indirect(val)
 	switch v := v.(type) {
 	case *reflect.BoolValue:
-		w := &BoolWrapper{}
+		w := &boolWrapper{}
 		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
 			return err
 		}
 		v.Set(w.Val)
 	case *reflect.IntValue:
-		w := &IntWrapper{}
+		w := &intWrapper{}
 		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
 			return err
 		}
@@ -174,7 +179,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 		case *reflect.UintptrValue:
 	*/
 	case *reflect.FloatValue:
-		w := &FloatWrapper{}
+		w := &floatWrapper{}
 		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
 			return err
 		}
@@ -184,7 +189,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 		case *reflect.Float64Value:
 	*/
 	case *reflect.StringValue:
-		w := &StrWrapper{}
+		w := &strWrapper{}
 		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
 			return err
 		}
@@ -196,7 +201,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 	case *reflect.StructValue:
 		switch e1 := e.(type) {
 		case *ConnInfoMsg:
-			flag := &BoolWrapper{}
+			flag := &boolWrapper{}
 			if err := ((*gob.Decoder)(gm)).Decode(flag); err != nil {
 				return err
 			}
@@ -210,7 +215,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 				return err
 			}
 			if flag.Val {
-				str := &StrWrapper{}
+				str := &strWrapper{}
 				if err := ((*gob.Decoder)(gm)).Decode(str); err != nil {
 					return err
 				}
@@ -221,7 +226,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 				return err
 			}
 			if flag.Val {
-				str := &StrWrapper{}
+				str := &strWrapper{}
 				if err := ((*gob.Decoder)(gm)).Decode(str); err != nil {
 					return err
 				}
@@ -230,7 +235,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 			return nil
 		case *IdChanInfoMsg:
 			dummyId := e1.Info[0].Id
-			num := &IntWrapper{}
+			num := &intWrapper{}
 			if err := ((*gob.Decoder)(gm)).Decode(num); err != nil {
 				return err
 			}
@@ -241,7 +246,7 @@ func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
 				if err := ((*gob.Decoder)(gm)).Decode(ici.Id); err != nil {
 					return err
 				}
-				ici.ElemType = new(ChanElemTypeData)
+				ici.ElemType = new(chanElemTypeData)
 				if err := ((*gob.Decoder)(gm)).Decode(ici.ElemType); err != nil {
 					return err
 				}
@@ -271,6 +276,7 @@ type jsonDemarshaler struct {
 	lenBuf [10]byte
 }
 
+//use package "json" for marshaling
 var JsonMarshaling MarshallingPolicy = jsonMarshallingPolicy(1)
 
 func (j jsonMarshallingPolicy) NewMarshaler(w io.Writer) Marshaler {
@@ -283,7 +289,7 @@ func (j jsonMarshallingPolicy) NewDemarshaler(r io.Reader) Demarshaler {
 
 func (jm *jsonMarshaler) encodeBool(v bool) (err os.Error) {
 	jm.buf.Reset()
-	data := BoolWrapper{v}
+	data := boolWrapper{v}
 	if err = json.Marshal(jm.buf, data); err != nil {
 		return
 	}
@@ -297,7 +303,7 @@ func (jm *jsonMarshaler) encodeBool(v bool) (err os.Error) {
 
 func (jm *jsonMarshaler) encodeInt(v int) (err os.Error) {
 	jm.buf.Reset()
-	data := IntWrapper{v}
+	data := intWrapper{v}
 	if err = json.Marshal(jm.buf, data); err != nil {
 		return
 	}
@@ -311,7 +317,7 @@ func (jm *jsonMarshaler) encodeInt(v int) (err os.Error) {
 
 func (jm *jsonMarshaler) encodeFloat(v float) (err os.Error) {
 	jm.buf.Reset()
-	data := FloatWrapper{v}
+	data := floatWrapper{v}
 	if err = json.Marshal(jm.buf, data); err != nil {
 		return
 	}
@@ -325,7 +331,7 @@ func (jm *jsonMarshaler) encodeFloat(v float) (err os.Error) {
 
 func (jm *jsonMarshaler) encodeStr(v string) (err os.Error) {
 	jm.buf.Reset()
-	data := StrWrapper{v}
+	data := strWrapper{v}
 	if err = json.Marshal(jm.buf, data); err != nil {
 		return
 	}
@@ -422,7 +428,7 @@ func (jm *jsonMarshaler) Marshal(e interface{}) (err os.Error) {
 					return
 				}
 				if v.ElemType == nil {
-					v.ElemType = new(ChanElemTypeData)
+					v.ElemType = new(chanElemTypeData)
 					elemType := v.ChanType.Elem()
 					v.ElemType.FullName = elemType.PkgPath() + "." + elemType.Name()
 				}
@@ -459,7 +465,7 @@ func (jm *jsonDemarshaler) decodeBool() (val bool, err os.Error) {
 	if num, err = jm.reader.Read(buf); num != n || err != nil {
 		return
 	}
-	data := &BoolWrapper{}
+	data := &boolWrapper{}
 	if ok, errtok := json.Unmarshal(string(buf), data); !ok {
 		err = os.ErrorString(errtok)
 		return
@@ -480,7 +486,7 @@ func (jm *jsonDemarshaler) decodeInt() (val int, err os.Error) {
 	if num, err = jm.reader.Read(buf); num != n || err != nil {
 		return
 	}
-	data := &IntWrapper{}
+	data := &intWrapper{}
 	if ok, errtok := json.Unmarshal(string(buf), data); !ok {
 		err = os.ErrorString(errtok)
 		return
@@ -501,7 +507,7 @@ func (jm *jsonDemarshaler) decodeFloat() (val float, err os.Error) {
 	if num, err = jm.reader.Read(buf); num != n || err != nil {
 		return
 	}
-	data := &FloatWrapper{}
+	data := &floatWrapper{}
 	if ok, errtok := json.Unmarshal(string(buf), data); !ok {
 		err = os.ErrorString(errtok)
 		return
@@ -522,7 +528,7 @@ func (jm *jsonDemarshaler) decodeStr() (val string, err os.Error) {
 	if num, err = jm.reader.Read(buf); num != n || err != nil {
 		return
 	}
-	data := &StrWrapper{}
+	data := &strWrapper{}
 	if ok, errtok := json.Unmarshal(string(buf), data); !ok {
 		err = os.ErrorString(errtok)
 		return
@@ -649,7 +655,7 @@ func (jm *jsonDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error 
 				if err = jm.decodeStruct(ici.Id); err != nil {
 					return err
 				}
-				ici.ElemType = new(ChanElemTypeData)
+				ici.ElemType = new(chanElemTypeData)
 				if err = jm.decodeStruct(ici.ElemType); err != nil {
 					return err
 				}
@@ -668,22 +674,22 @@ func (jm *jsonDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error 
 
 //since gob/json only supports marshalling/demarshalling of structs as top-level Value
 //add a struct wrapper for basic types, such as int/float/string/array/slice
-type BoolWrapper struct {
+type boolWrapper struct {
 	Val bool
 }
 
-type IntWrapper struct {
+type intWrapper struct {
 	Val int
 }
 
-type StrWrapper struct {
+type strWrapper struct {
 	Val string
 }
 
-type ByteArrayWrapper struct {
+type byteArrayWrapper struct {
 	Val []byte
 }
 
-type FloatWrapper struct {
+type floatWrapper struct {
 	Val float
 }

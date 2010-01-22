@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -12,14 +13,33 @@ import (
 	"reflect"
 )
 
-//Scope is the scope to publish/send msgs
+//Membership identifies whether communicating peers (send chans and recv chans) are from the same router or diff routers
 const (
-	ScopeGlobal = iota
-	ScopeRemote
-	ScopeLocal
+	MemberLocal  = iota //peers (send chans and recv chans) are from the same router
+	MemberRemote //peers (send chans and recv chans) are from diff routers
+	NumMembership
+)
+
+//return the string values of membership
+func MemberString(m int) string {
+	switch m {
+	case MemberLocal:
+		return "MemberLocal"
+	case MemberRemote:
+		return "MemberRemote"
+	}
+	return "InvalidMembership"
+}
+
+//Scope is the scope to publish/subscribe (or send/recv) msgs
+const (
+	ScopeGlobal = iota // send to or recv from both local and remote peers
+	ScopeRemote // send to or recv from remote peers
+	ScopeLocal  // send to or recv from local peers
 	NumScope
 )
 
+//return string values of Scope
 func ScopeString(s int) string {
 	switch s {
 	case ScopeLocal:
@@ -30,24 +50,6 @@ func ScopeString(s int) string {
 		return "ScopeGlobal"
 	}
 	return "InvalidScope"
-}
-
-//Membership identifies whether communicating peers are connected to namespace of the same router
-//or diff & connected routers
-const (
-	MemberLocal = iota
-	MemberRemote
-	NumMembership
-)
-
-func MemberString(m int) string {
-	switch m {
-	case MemberLocal:
-		return "MemberLocal"
-	case MemberRemote:
-		return "MemberRemote"
-	}
-	return "InvalidMembership"
 }
 
 //MatchType describes the types of namespaces and match algorithms used for id-matching
@@ -61,22 +63,27 @@ const (
 
 //Id defines the common interface shared by all kinds of ids: integers/strings/pathnames...
 type Id interface {
-	//query
+	//methods to query Id content
 	Scope() int
 	Member() int
-	//for store in map
+
+	//key value for storing Id in map
 	Key() interface{}
+
 	//for id matching
 	Match(Id) bool
 	MatchType() MatchType
-	//for generating other ids of same type
-	SysID(int, ...) (Id, os.Error) //generate sys ids, also called as method of "router"
+
+	//Generators for creating other ids of same type. Since often we don't
+	//know the exact types of Id.Val, so we have to create new ones from an existing id
+	SysID(int, ...) (Id, os.Error) //generate sys ids, also called as method of Router
 	Clone(...) (Id, os.Error)      //create a new id with same id, but possible diff scope & membership
-	//Stringer
+
+	//Stringer interface
 	String() string
 }
 
-//indices for sys msgs
+//Indices for sys msgs, used for creating SysIds
 const (
 	RouterConnId = iota
 	RouterDisconnId
@@ -89,20 +96,20 @@ const (
 	NumSysIds
 )
 
-//some system level internal ids
+//Some system level internal ids (for router internal logging and fault reporting)
 const (
 	RouterLogId = NumSysIds + iota
 	RouterFaultId
 	NumSysInternalIds
 )
 
-//a function used as predicate in router.idsForSend()/idsForRecv() to find all ids in a router's
+//A function used as predicate in router.idsForSend()/idsForRecv() to find all ids in a router's
 //namespace which are exported to outside
 func ExportedId(id Id) bool {
 	return id.Member() == MemberLocal && (id.Scope() == ScopeRemote || id.Scope() == ScopeGlobal)
 }
 
-//use integer as ids in router
+//Use integer as ids in router
 type IntId struct {
 	Val       int
 	ScopeVal  int
@@ -143,7 +150,7 @@ func (id IntId) String() string {
 	return fmt.Sprintf("%d_%s_%s", id.Val, ScopeString(id.ScopeVal), MemberString(id.MemberVal))
 }
 //define 8 system msg ids
-var IntSysIdBase int = -10101 //need better values
+var IntSysIdBase int = -10101 //Base value for SysIds of IntId
 func (id IntId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
@@ -165,7 +172,7 @@ func (id IntId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	return
 }
 
-//use strings as ids in router
+//Use strings as ids in router
 type StrId struct {
 	Val       string
 	ScopeVal  int
@@ -206,7 +213,7 @@ func (id StrId) String() string {
 	return fmt.Sprintf("%s_%s_%s", id.Val, ScopeString(id.ScopeVal), MemberString(id.MemberVal))
 }
 //define 8 system msg ids
-var StrSysIdBase string = "-10101" //need better values
+var StrSysIdBase string = "-10101" //Base value for SysIds of StrId
 func (id StrId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
@@ -228,8 +235,8 @@ func (id StrId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	return
 }
 
-//use file-system like pathname as ids
-//pathId has diff Match() algo from StrId
+//Use file-system like pathname as ids
+//PathId has diff Match() algo from StrId
 type PathId struct {
 	Val       string
 	ScopeVal  int
@@ -295,7 +302,7 @@ func (id PathId) String() string {
 	return fmt.Sprintf("%s_%s_%s", id.Val, ScopeString(id.ScopeVal), MemberString(id.MemberVal))
 }
 //define 8 system msg ids
-var PathSysIdBase string = "/10101" //need better values
+var PathSysIdBase string = "/10101" //Base value for SysIds of PathId
 func (id PathId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
@@ -317,7 +324,7 @@ func (id PathId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	return
 }
 
-//use a common msgTag as Id
+//Use a common msgTag as Id
 type MsgTag struct {
 	Family int //divide all msgs into families: system, fault, provision,...
 	Tag    int //further division inside a family
@@ -366,7 +373,7 @@ func (id MsgId) String() string {
 	return fmt.Sprintf("%v_%s_%s", id.Val, ScopeString(id.ScopeVal), MemberString(id.MemberVal))
 }
 //define 8 system msg ids
-var MsgSysIdBase MsgTag = MsgTag{-10101, -10101} //need better values
+var MsgSysIdBase MsgTag = MsgTag{-10101, -10101} //Base value for SysIds of MsgId
 func (id MsgId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
@@ -390,8 +397,9 @@ func (id MsgId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	return
 }
 
-//various Id constructors
+//Various Id constructors
 
+//Some dummy ids, often used as seedId when creating router
 var (
 	DummyIntId  Id = &IntId{Val: -10201}
 	DummyStrId  Id = &StrId{Val: "-10201"}
@@ -399,6 +407,12 @@ var (
 	DummyMsgId  Id = &MsgId{Val: MsgTag{-10201, -10201}}
 )
 
+/*
+ IntId constructor, accepting the following arguments:
+    Val       int
+    ScopeVal  int
+    MemberVal int
+*/
 func IntID(args ...) Id {
 	v := reflect.NewValue(args).(*reflect.StructValue)
 	if v.NumField() == 0 {
@@ -424,6 +438,12 @@ func IntID(args ...) Id {
 	return id
 }
 
+/*
+ StrId constructor, accepting the following arguments:
+    Val       string
+    ScopeVal  int
+    MemberVal int
+*/
 func StrID(args ...) Id {
 	v := reflect.NewValue(args).(*reflect.StructValue)
 	if v.NumField() == 0 {
@@ -452,6 +472,12 @@ func StrID(args ...) Id {
 	return id
 }
 
+/*
+ PathId constructor, accepting the following arguments:
+    Val       string (path names, such as /sport/basketball/news/...)
+    ScopeVal  int
+    MemberVal int
+*/
 func PathID(args ...) Id {
 	v := reflect.NewValue(args).(*reflect.StructValue)
 	if v.NumField() == 0 {
@@ -480,6 +506,13 @@ func PathID(args ...) Id {
 	return id
 }
 
+/*
+ MsgId constructor, accepting the following arguments:
+    Family    int
+    Tag       int
+    ScopeVal  int
+    MemberVal int
+*/
 func MsgID(args ...) Id {
 	v := reflect.NewValue(args).(*reflect.StructValue)
 	if v.NumField() == 0 {

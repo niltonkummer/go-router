@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -12,7 +13,7 @@ import (
 	"fmt"
 )
 
-type Stream struct {
+type stream struct {
 	peerBase
 	myCmdChan chan peerCommand
 	//
@@ -27,14 +28,14 @@ type Stream struct {
 	Closed bool
 }
 
-func NewStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *Stream {
-	s := new(Stream)
+func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stream {
+	s := new(stream)
 	s.proxy = p
 	//create export chans
 	s.myCmdChan = make(chan peerCommand, DefCmdChanBufSize)
-	s.exportConnChan = make(chan GenericMsg, p.router.defChanBufSize)
-	s.exportPubSubChan = make(chan GenericMsg, p.router.defChanBufSize)
-	s.exportAppDataChan = make(chan GenericMsg, p.router.defChanBufSize)
+	s.exportConnChan = make(chan genericMsg, p.router.defChanBufSize)
+	s.exportPubSubChan = make(chan genericMsg, p.router.defChanBufSize)
+	s.exportAppDataChan = make(chan genericMsg, p.router.defChanBufSize)
 	//
 	s.rwc = rwc
 	s.mar = mp.NewMarshaler(rwc)
@@ -49,22 +50,22 @@ func NewStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *Stre
 		}
 		ln += "_stream"
 	}
-	s.Logger.Init(p.router.SysID(RouterLogId), p.router, ln, DefLogBufSize)
-	s.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln, DefCmdChanBufSize, faultTypeString)
+	s.Logger.Init(p.router.SysID(RouterLogId), p.router, ln)
+	s.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln)
 	return s
 }
 
-func (s *Stream) Start() {
+func (s *stream) Start() {
 	go s.outputMainLoop()
 	go s.inputMainLoop()
 }
 
-func (s *Stream) Close() {
+func (s *stream) Close() {
 	s.Log(LOG_INFO, "Close() is called")
-	s.myCmdChan <- Close
+	s.myCmdChan <- peerClose
 }
 
-func (s *Stream) closeImpl() {
+func (s *stream) closeImpl() {
 	if !s.Closed {
 		s.Log(LOG_INFO, "closeImpl called")
 		s.Closed = true
@@ -76,34 +77,34 @@ func (s *Stream) closeImpl() {
 	}
 }
 
-func (s *Stream) send(m GenericMsg, appMsg bool) (err os.Error) {
+func (s *stream) send(m genericMsg, appMsg bool) (err os.Error) {
 	if appMsg {
-		_, ok := m.Data.(ChanCloseMsg)
+		_, ok := m.Data.(chanCloseMsg)
 		id := m.Id
 		if ok {
 			id, _ = m.Id.Clone(NumScope, NumMembership) //special id to mark chan close
 		}
 		if err = s.mar.Marshal(id); err != nil {
 			s.LogError(err)
-			//s.Raise(MarshalFailure, err)
+			//s.Raise(err)
 			return
 		}
 		if !ok {
 			if err := s.mar.Marshal(m.Data); err != nil {
 				s.LogError(err)
-				//s.Raise(MarshalFailure, err)
+				//s.Raise(err)
 				return
 			}
 		}
 	} else {
 		if err = s.mar.Marshal(m.Id); err != nil {
 			s.LogError(err)
-			//s.Raise(MarshalFailure, err)
+			//s.Raise(err)
 			return
 		}
 		if err := s.mar.Marshal(m.Data); err != nil {
 			s.LogError(err)
-			//s.Raise(MarshalFailure, err)
+			//s.Raise(err)
 			return
 		}
 	}
@@ -112,14 +113,14 @@ func (s *Stream) send(m GenericMsg, appMsg bool) (err os.Error) {
 }
 
 //read data from importConnChan/importPubSubChan/importAppDataChan and send them to io.Writer
-func (s *Stream) outputMainLoop() {
+func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop start")
 	proxyDisconn := false
 	cont := true
 	for cont {
 		select {
 		case cmd := <-s.myCmdChan:
-			if cmd == Close {
+			if cmd == peerClose {
 				cont = false
 			}
 		case m := <-s.importConnChan:
@@ -149,14 +150,14 @@ func (s *Stream) outputMainLoop() {
 	if !proxyDisconn {
 		//must be io conn fail or marshal fail
 		//notify proxy disconn
-		s.exportConnChan <- GenericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
+		s.exportConnChan <- genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
 	}
 	s.closeImpl()
 	s.Log(LOG_INFO, "outputMainLoop exit")
 }
 
 //read data from io.Reader and pass them to exportConnChan/exportPubSubChan/exportAppDataChan
-func (s *Stream) inputMainLoop() {
+func (s *stream) inputMainLoop() {
 	s.Log(LOG_INFO, "inputMainLoop start")
 	cont := true
 	for cont {
@@ -166,17 +167,17 @@ func (s *Stream) inputMainLoop() {
 	}
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
-	s.exportConnChan <- GenericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
+	s.exportConnChan <- genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
 	//s.closeImpl() only called from outputMainLoop
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
 
-func (s *Stream) recv() (err os.Error) {
+func (s *stream) recv() (err os.Error) {
 	r := s.proxy.router
 	id, _ := r.seedId.Clone()
 	if err = s.demar.Demarshal(id, nil); err != nil {
 		s.LogError(err)
-		//s.Raise(DemarshalFailure, err)
+		//s.Raise(err)
 		return
 	}
 	switch {
@@ -191,10 +192,10 @@ func (s *Stream) recv() (err os.Error) {
 		cim := ConnInfoMsg{SeedId: idc}
 		if err = s.demar.Demarshal(&cim, nil); err != nil {
 			s.LogError(err)
-			//s.Raise(DemarshalFailure, err)
+			//s.Raise(err)
 			return
 		}
-		s.exportConnChan <- GenericMsg{id, cim}
+		s.exportConnChan <- genericMsg{id, cim}
 	case id.Match(r.SysID(PubId)):
 		fallthrough
 	case id.Match(r.SysID(UnPubId)):
@@ -206,28 +207,28 @@ func (s *Stream) recv() (err os.Error) {
 		icm := IdChanInfoMsg{[]*IdChanInfo{&IdChanInfo{idc, nil, nil}}}
 		if err = s.demar.Demarshal(&icm, nil); err != nil {
 			s.LogError(err)
-			//s.Raise(DemarshalFailure, err)
+			//s.Raise(err)
 			return
 		}
-		s.exportPubSubChan <- GenericMsg{id, icm}
+		s.exportPubSubChan <- genericMsg{id, icm}
 	default: //appMsg
 		if id.Scope() == NumScope && id.Member() == NumMembership { //chan is closed
-			s.exportAppDataChan <- GenericMsg{id, ChanCloseMsg{}}
+			s.exportAppDataChan <- genericMsg{id, chanCloseMsg{}}
 		} else {
 			chanType := s.proxy.getExportRecvChanType(id)
 			if chanType == nil {
 				errStr := fmt.Sprintf("failed to find chanType for id %v", id)
 				s.Log(LOG_ERROR, errStr)
-				//s.Raise(DemarshalFailure, os.ErrorString(errStr))
+				//s.Raise(os.ErrorString(errStr))
 				return
 			}
 			val := reflect.MakeZero(chanType.Elem())
 			if err = s.demar.Demarshal(val.Interface(), val); err != nil {
 				s.LogError(err)
-				//s.Raise(DemarshalFailure, err)
+				//s.Raise(err)
 				return
 			}
-			s.exportAppDataChan <- GenericMsg{id, val.Interface()}
+			s.exportAppDataChan <- genericMsg{id, val.Interface()}
 		}
 	}
 	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))

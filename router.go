@@ -3,6 +3,26 @@
 //
 // Distributed under New BSD License
 //
+
+/*
+"router" is a Go package for remote channel communication, based on peer-peer pub/sub model.
+Basically we attach a send channel to an id in router to send messages, and attach a recv channel to
+an id to receive messages. If these 2 ids match, the messages from send channel will be "routed" to recv channel, e.g.
+
+   rot := router.New(...)
+   chan1 := make(chan string)
+   chan2 := make(chan string)
+   chan3 := make(chan string)
+   rot.AttachSendChan(PathID("/sports/basketball"), chan1)
+   rot.AttachRecvChan(PathID("/sports/basketball"), chan2)
+   rot.AttachRecvChan(PathID("/sports/*"), chan3)
+
+We can use integers, strings, pathnames, or structs as Ids in router (maybe regex ids
+and tuple id in future).
+
+we can connect two routers so that channels attached to router1 can communicate with
+channels attached to router2 transparently.
+*/
 package router
 
 import (
@@ -25,10 +45,10 @@ const (
 //of it thru router.New(...) and attach channels to it
 type Router interface {
 	//---- core api ----
-	//Attach chans to id in router,
-	//optional (chan BindEvent) serving two purposes:
-	//1. telling when other ends connecting/disconn
-	//2. in AttachRecvChan, telling router to keep recv chan open when all senders close
+	//Attach chans to id in router, with an optional argument (chan BindEvent)
+	//When specified, the optional argument will serve two purposes:
+	//1. used to tell when other ends connecting/disconn
+	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
 	AttachSendChan(Id, interface{}, ...) os.Error
 	AttachRecvChan(Id, interface{}, ...) os.Error
 
@@ -38,18 +58,23 @@ type Router interface {
 	//Shutdown router
 	Close()
 
-	//Connect this router to another router. The connection can be disconnected by Proxy.Close()
+	//Connect this router to another router.
+	//1. internally it calls Proxy.Connect(...) to do the real job
+	//2. The connection can be disconnected by calling Proxy.Close() on returned proxy object
+	//3. for more compilcated connection setup (such as setting IdFilter and IdTranslator), use Proxy.Connect() instead
 	//Connect to a local router
 	Connect(Router) (Proxy, Proxy, os.Error)
+
 	//Connect to a remote router thru io conn
 	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
 
 	//--- other utils ---
 	//return pre-created SysIds according to the router's id-type, with ScopeGlobal / MemberLocal
 	SysID(idx int) Id
+
 	//create a new SysId with "args..." specifying scope/membership
 	NewSysID(idx int, args ...) Id
-	//should we expose the following?
+
 	//return all ids and their ChanTypes from router's namespace which satisfy predicate
 	IdsForSend(predicate func(id Id) bool) map[interface{}]*IdChanInfo
 	IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdChanInfo
@@ -57,6 +82,7 @@ type Router interface {
 
 //The internal commands handled by router's main goroutine loop
 type commandType int
+
 const (
 	attach commandType = iota
 	detach
@@ -80,8 +106,8 @@ type command struct {
 type tblEntry struct {
 	chanType *reflect.ChanType
 	id       Id
-	senders  map[interface{}]*Endpoint
-	recvers  map[interface{}]*Endpoint
+	senders  map[interface{}]*endpoint
+	recvers  map[interface{}]*endpoint
 }
 
 type routerImpl struct {
@@ -179,14 +205,14 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
-		s.Raise(AttachSendFailure, err)
+		s.Raise(err)
 		return
 	}
 	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errNotChan)
 		s.LogError(err)
-		s.Raise(AttachSendFailure, err)
+		s.Raise(err)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
@@ -199,19 +225,19 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 			if !ok {
 				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
 				s.LogError(err)
-				s.Raise(AttachSendFailure, err)
+				s.Raise(err)
 				return
 			}
 			if cap(bindChan) == 0 {
 				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 				s.LogError(err)
-				s.Raise(AttachSendFailure, err)
+				s.Raise(err)
 				return
 			}
 		default:
 			err = os.ErrorString("invalid arguments to attach chan")
 			s.LogError(err)
-			s.Raise(AttachSendFailure, err)
+			s.Raise(err)
 			return
 		}
 	}
@@ -225,7 +251,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	cmd = <-cmd.rspChan //wait for response from router
 	if cmd.error != nil {
 		err = cmd.error
-		s.Raise(AttachSendFailure, err)
+		s.Raise(err)
 		s.LogError(err)
 		return
 	}
@@ -248,14 +274,14 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
-		s.Raise(AttachRecvFailure, err)
+		s.Raise(err)
 		return
 	}
 	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errNotChan)
 		s.LogError(err)
-		s.Raise(AttachRecvFailure, err)
+		s.Raise(err)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
@@ -270,13 +296,13 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 				if !ok {
 					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
 					s.LogError(err)
-					s.Raise(AttachRecvFailure, err)
+					s.Raise(err)
 					return
 				}
 				if cap(bindChan) == 0 {
 					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 					s.LogError(err)
-					s.Raise(AttachRecvFailure, err)
+					s.Raise(err)
 					return
 				}
 			case *reflect.BoolValue:
@@ -284,7 +310,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 			default:
 				err = os.ErrorString("invalid arguments to attach recv chan")
 				s.LogError(err)
-				s.Raise(AttachRecvFailure, err)
+				s.Raise(err)
 				return
 			}
 		}
@@ -300,7 +326,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 	if cmd.error != nil {
 		err = cmd.error
 		s.LogError(err)
-		s.Raise(AttachRecvFailure, err)
+		s.Raise(err)
 		return
 	}
 	//now we are attached successfully, start forwarding
@@ -309,7 +335,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		for cont {
 			v := <-endp.Chan
 			if !closed(endp.Chan) {
-				if _, ok1 := v.(ChanCloseMsg); ok1 {
+				if _, ok1 := v.(chanCloseMsg); ok1 {
 					if endp.bindChan != nil {
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
@@ -341,17 +367,17 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 	s.Log(LOG_INFO, "DetachChan called...")
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
-		s.Raise(DetachFailure, err)
+		s.Raise(err)
 		return
 	}
 	cv, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errNotChan)
 		s.LogError(err)
-		s.Raise(DetachFailure, err)
+		s.Raise(err)
 		return
 	}
-	endp := &Endpoint{}
+	endp := &endpoint{}
 	endp.Id = id
 	endp.extIntf = cv
 	cmd := &command{}
@@ -410,7 +436,7 @@ func (s *routerImpl) mainLoop() {
 }
 
 func (s *routerImpl) attach(cmd *command) {
-	endp := cmd.data.(*Endpoint)
+	endp := cmd.data.(*endpoint)
 
 	//handle id
 	if reflect.Typeof(endp.Id) != s.idType {
@@ -428,8 +454,8 @@ func (s *routerImpl) attach(cmd *command) {
 		s.routingTable[endp.Id.Key()] = ent
 		ent.id = endp.Id // will only use the Val/Match() part of id
 		ent.chanType = endp.extIntf.Type().(*reflect.ChanType)
-		ent.senders = make(map[interface{}]*Endpoint)
-		ent.recvers = make(map[interface{}]*Endpoint)
+		ent.senders = make(map[interface{}]*endpoint)
+		ent.recvers = make(map[interface{}]*endpoint)
 	} else {
 		if endp.extIntf.Type().(*reflect.ChanType) != ent.chanType {
 			cmd.error = os.ErrorString(fmt.Sprintf("%s %v", errChanTypeMismatch, endp.Id))
@@ -511,10 +537,10 @@ func (s *routerImpl) attach(cmd *command) {
 						}
 					}
 				} else {
-					em := fmt.Sprintf("%s : [%v, %v]", errChanTypeMismatch, endp.Id, ent2.id)
+					em := os.ErrorString(fmt.Sprintf("%s : [%v, %v]", errChanTypeMismatch, endp.Id, ent2.id))
 					s.Log(LOG_ERROR, em)
 					//should crash here?
-					s.Raise(ChanTypeMismatch, em)
+					s.Raise(em)
 				}
 			}
 		}
@@ -528,7 +554,7 @@ func (s *routerImpl) attach(cmd *command) {
 		endp.start(s.defChanBufSize, s.dispPolicy)
 	}
 
-	//finished updating routing table, spawn remaining work 
+	//finished updating routing table, spawn remaining work
 	//in another goroutine to avoid blocking router main goroutine
 	go func() {
 		//create a chan *command to allow router mainLoop to wait for all bindings of the new endpoint to set up
@@ -536,7 +562,7 @@ func (s *routerImpl) attach(cmd *command) {
 		count := 0 //count how many outstanding
 
 		for i := 0; i < matches.Len(); i++ {
-			peer := matches.At(i).(*Endpoint)
+			peer := matches.At(i).(*endpoint)
 			endp.attach(peer, done)
 			peer.attach(endp, done)
 			count += 2
@@ -566,7 +592,7 @@ func (s *routerImpl) attach(cmd *command) {
 }
 
 func (s *routerImpl) detach(cmd *command) {
-	endp := cmd.data.(*Endpoint)
+	endp := cmd.data.(*endpoint)
 	s.Log(LOG_INFO, fmt.Sprintf("detach chan from id %v\n", endp.Id))
 
 	//check id
@@ -730,7 +756,19 @@ func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy
 	return
 }
 
-//New is router constructor
+/*
+New is router constructor. It accepts the following arguments:
+    1. seedId: a dummy id to show what type of ids will be used. New ids will be type-checked against this.
+    2. bufSize: by default, 32 is the default size for router's internal channels.
+                if bufSize > 0, its value will be used.
+    3. disp: dispatch policy for router. by default, it is BroadcastPolicy
+    4. optional arguments ...:
+            name:     router's name, if name is defined, router internal logging will be turned on,
+                      ie LogRecord generated
+            LogScope: if this is set, a console log sink is installed to show router internal log
+                      if logScope == ScopeLocal, only log msgs from local router will show up
+                      if logScope == ScopeGlobal, all log msgs from connected routers will show up
+*/
 func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
 	//parse optional router name and flag for enable console logging
 	var name string
@@ -770,10 +808,10 @@ func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
 	router.proxies = new(vector.Vector)
 	go router.mainLoop()
 	router.notifier = newNotifier(router)
-	router.Logger.Init(router.SysID(RouterLogId), router, router.name, DefLogBufSize)
+	router.Logger.Init(router.SysID(RouterLogId), router, router.name)
 	if consoleLogScope >= ScopeGlobal && consoleLogScope <= ScopeLocal {
 		router.LogSink.Init(router.NewSysID(RouterLogId, consoleLogScope), router)
 	}
-	router.FaultRaiser.Init(router.SysID(RouterFaultId), router, router.name, DefCmdChanBufSize, faultTypeString)
+	router.FaultRaiser.Init(router.SysID(RouterFaultId), router, router.name)
 	return router
 }

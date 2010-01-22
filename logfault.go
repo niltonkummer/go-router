@@ -3,17 +3,18 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
 	"os"
 	"time"
 	"log"
-	"fmt"
+	//	"fmt"
 	//		"strconv"
 )
 
-//some basic msgs for log and fault
+//Some basic error msgs for log and fault
 var (
 	errIdTypeMismatch        = "id type mismatch"
 	errNotChan               = "values other than channels cannot be attached to router"
@@ -54,6 +55,7 @@ func (lp LogPriority) String() string {
 	return "InvalidLogType"
 }
 
+//LogRecord stores the log information
 type LogRecord struct {
 	Pri       LogPriority
 	Source    string
@@ -115,20 +117,21 @@ func (l *logger) Close() {
 	//l.router.DetachChan(l.id, l.logChan);
 }
 
-//a wrapper for embed
+//Logger can be embedded into user structs / types, which then can use Log() / LogError() directly
 type Logger struct {
 	router *routerImpl
 	logger *logger
 }
 
-func NewLogger(id Id, r Router, src string, bufSize int) *Logger {
-	return new(Logger).Init(id, r, src, bufSize)
+//NewLogger will create a Logger object which sends log messages thru id in router "r"
+func NewLogger(id Id, r Router, src string) *Logger {
+	return new(Logger).Init(id, r, src)
 }
 
-func (l *Logger) Init(id Id, r Router, src string, bufSize int) *Logger {
+func (l *Logger) Init(id Id, r Router, src string) *Logger {
 	l.router = r.(*routerImpl)
 	if len(src) > 0 {
-		l.logger = newlogger(id, l.router, src, bufSize)
+		l.logger = newlogger(id, l.router, src, DefLogBufSize)
 	}
 	return l
 }
@@ -139,24 +142,27 @@ func (l *Logger) Close() {
 	}
 }
 
+//send a log record to log id in router
 func (r *Logger) Log(p LogPriority, msg interface{}) {
 	if r.logger != nil {
 		r.logger.log(p, msg)
 	}
 }
 
+//send a log record and store error info in it
 func (r *Logger) LogError(err os.Error) {
 	if r.logger != nil {
 		r.logger.log(LOG_ERROR, err)
 	}
 }
 
-//a simple log sink
+//A simple log sink, showing log messages in console.
 type LogSink struct {
 	sinkChan chan *LogRecord
 	sinkExit chan bool
 }
 
+//create a new log sink, which receives log messages from id in router "r"
 func NewLogSink(id Id, r Router) *LogSink { return new(LogSink).Init(id, r) }
 
 func (l *LogSink) Init(id Id, r Router) *LogSink {
@@ -217,63 +223,27 @@ func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
 
 //Fault management
 
-//Fault types: faults under the same fault id can be further divided into diff types
-//here are fault types for router internal implementation.
-//apps can have their own types, and app should provide its own func to map fault to string
-const (
-	IdTypeMismatch = iota
-	ChanTypeMismatch
-	AttachSendFailure
-	AttachRecvFailure
-	DetachFailure
-	MarshalFailure
-	DemarshalFailure
-	//more ...
-)
-
-func faultTypeString(f int) string {
-	switch f {
-	case IdTypeMismatch:
-		return "IdTypeMismatch"
-	case ChanTypeMismatch:
-		return "ChanTypeMismatch"
-	case AttachSendFailure:
-		return "AttachSendFailure"
-	case AttachRecvFailure:
-		return "AttachRecvFailure"
-	case DetachFailure:
-		return "DetachFailure"
-	case MarshalFailure:
-		return "MarshalFailure"
-	case DemarshalFailure:
-		return "DemarshalFailure"
-	}
-	return fmt.Sprintf("_FaultType_%d_", f)
-}
-
+//FaultRecord records some details about fault
 type FaultRecord struct {
-	Type      int
 	Source    string
-	Info      interface{}
+	Info      os.Error
 	Timestamp int64
 }
 
 type faultRaiser struct {
 	bindEvtChan chan BindEvent
 	source      string
-	typeString  func(int) string
 	faultChan   chan *FaultRecord
 	router      *routerImpl
 	id          Id
 	caught      bool
 }
 
-func newfaultRaiser(id Id, r Router, src string, bufSize int, ts func(int) string) *faultRaiser {
+func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 	faultRaiser := new(faultRaiser)
 	faultRaiser.id = id
 	faultRaiser.router = r.(*routerImpl)
 	faultRaiser.source = src
-	faultRaiser.typeString = ts
 	faultRaiser.bindEvtChan = make(chan BindEvent, 1) //just need the latest binding event
 	faultRaiser.faultChan = make(chan *FaultRecord, bufSize)
 	err := faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan, faultRaiser.bindEvtChan)
@@ -285,7 +255,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int, ts func(int) strin
 	return faultRaiser
 }
 
-func (l *faultRaiser) raise(p int, msg interface{}) {
+func (l *faultRaiser) raise(msg os.Error) {
 	if len(l.bindEvtChan) > 0 {
 		be := <-l.bindEvtChan
 		if be.Count > 0 {
@@ -296,12 +266,12 @@ func (l *faultRaiser) raise(p int, msg interface{}) {
 	}
 
 	if !l.caught {
-		//l.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v, %v", p, msg))
-		log.Crashf("Crash at %v, %v", l.typeString(p), msg)
+		//l.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
+		log.Crashf("Crash at %v", msg)
 		return
 	}
 
-	lr := &FaultRecord{p, l.source, msg, time.Nanoseconds()}
+	lr := &FaultRecord{l.source, msg, time.Nanoseconds()}
 
 	//send all msgs which are too important to lose
 	l.faultChan <- lr
@@ -312,20 +282,21 @@ func (l *faultRaiser) Close() {
 	//l.router.DetachChan(l.id, l.faultChan);
 }
 
-//a wrapper for embed
+//FaultRaiser can be embedded into user structs/ types, which then can call Raise() directly
 type FaultRaiser struct {
 	router      *routerImpl
 	faultRaiser *faultRaiser
 }
 
-func NewFaultRaiser(id Id, r Router, src string, bufSize int, ts func(int) string) *FaultRaiser {
-	return new(FaultRaiser).Init(id, r, src, bufSize, ts)
+//create a new FaultRaiser to send FaultRecords to id in router "r"
+func NewFaultRaiser(id Id, r Router, src string) *FaultRaiser {
+	return new(FaultRaiser).Init(id, r, src)
 }
 
-func (l *FaultRaiser) Init(id Id, r Router, src string, bufSize int, ts func(int) string) *FaultRaiser {
+func (l *FaultRaiser) Init(id Id, r Router, src string) *FaultRaiser {
 	l.router = r.(*routerImpl)
 	if len(src) > 0 {
-		l.faultRaiser = newfaultRaiser(id, r, src, bufSize, ts)
+		l.faultRaiser = newfaultRaiser(id, r, src, DefCmdChanBufSize)
 	}
 	return l
 }
@@ -336,11 +307,12 @@ func (l *FaultRaiser) Close() {
 	}
 }
 
-func (r *FaultRaiser) Raise(p int, msg interface{}) {
+//raise a fault - send a FaultRecord to faultId in router
+func (r *FaultRaiser) Raise(msg os.Error) {
 	if r.faultRaiser != nil {
-		r.faultRaiser.raise(p, msg)
+		r.faultRaiser.raise(msg)
 	} else {
-		//r.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v, %v", p, msg))
-		log.Crashf("Crash at %v, %v", faultTypeString(p), msg)
+		//r.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
+		log.Crashf("Crash at %v", msg)
 	}
 }

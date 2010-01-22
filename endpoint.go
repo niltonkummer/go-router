@@ -3,6 +3,7 @@
 //
 // Distributed under New BSD License
 //
+
 package router
 
 import (
@@ -16,31 +17,31 @@ const (
 	recverType
 )
 
-type Endpoint struct {
+type endpoint struct {
 	kind       endpointType
 	Id         Id
 	bindChan   chan BindEvent
 	extIntf    *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
 	Chan       chan interface{}   //sendChan for sender, recvChan for recver, internal to router
-	bindings   []*Endpoint        //binding_set
+	bindings   []*endpoint        //binding_set
 	cmdChan    chan *command
 	dispatcher Dispatcher //current for push dispacher, only sender uses dispatcher
 }
 
-func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue) *Endpoint {
-	endp := &Endpoint{}
+func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue) *endpoint {
+	endp := &endpoint{}
 	endp.kind = t
 	endp.Id = id
 	endp.extIntf = ch
 	return endp
 }
 
-func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
+func (e *endpoint) start(bufSize int, disp DispatchPolicy) {
 	if e.Chan != nil {
 		return //already started
 	}
 	e.Chan = make(chan interface{}, bufSize)
-	e.bindings = make([]*Endpoint, 0, DefBindingSetSize)
+	e.bindings = make([]*endpoint, 0, DefBindingSetSize)
 	e.cmdChan = make(chan *command, DefCmdChanBufSize)
 	if e.kind == senderType {
 		e.dispatcher = disp.NewDispatcher()
@@ -50,7 +51,7 @@ func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
 	}
 }
 
-func (e *Endpoint) Close() {
+func (e *endpoint) Close() {
 	if e.bindChan != nil {
 		close(e.bindChan)
 	}
@@ -60,13 +61,13 @@ func (e *Endpoint) Close() {
 	//e.cmdChan <- &command{kind:shutdown}
 }
 
-func (e *Endpoint) handleCmd(cmd *command) (cont bool) {
+func (e *endpoint) handleCmd(cmd *command) (cont bool) {
 	cont = true
 	switch cmd.kind {
 	case attach:
-		e.attachImpl(cmd.data.(*Endpoint), cmd.rspChan)
+		e.attachImpl(cmd.data.(*endpoint), cmd.rspChan)
 	case detach:
-		e.detachImpl(cmd.data.(*Endpoint))
+		e.detachImpl(cmd.data.(*endpoint))
 	case shutdown:
 		e.cleanup()
 		//drain all pending commands and exit
@@ -81,13 +82,13 @@ func (e *Endpoint) handleCmd(cmd *command) (cont bool) {
 	return
 }
 
-func (e *Endpoint) recverLoop() {
+func (e *endpoint) recverLoop() {
 	for cmd := range e.cmdChan {
 		e.handleCmd(cmd)
 	}
 }
 
-func (e *Endpoint) senderLoop() {
+func (e *endpoint) senderLoop() {
 	cont := true
 	for cont {
 		if len(e.bindings) == 0 {
@@ -130,9 +131,9 @@ func (e *Endpoint) senderLoop() {
 	}
 }
 
-func (e *Endpoint) cleanup() {}
+func (e *endpoint) cleanup() {}
 
-func (e *Endpoint) detachAllRecvChans() {
+func (e *endpoint) detachAllRecvChans() {
 	for i, r := range e.bindings {
 		r.detach(e)
 		e.bindings[i] = nil
@@ -140,11 +141,11 @@ func (e *Endpoint) detachAllRecvChans() {
 	e.bindings = e.bindings[0:0]
 }
 
-func (e *Endpoint) attachImpl(p *Endpoint, done chan *command) {
+func (e *endpoint) attachImpl(p *endpoint, done chan *command) {
 	len0 := len(e.bindings)
 	if len0 == cap(e.bindings) {
 		//expand
-		newBindings := make([]*Endpoint, len0+DefBindingSetSize)
+		newBindings := make([]*endpoint, len0+DefBindingSetSize)
 		copy(newBindings, e.bindings)
 		e.bindings = newBindings
 	}
@@ -159,7 +160,7 @@ func (e *Endpoint) attachImpl(p *Endpoint, done chan *command) {
 	done <- nil
 }
 
-func (e *Endpoint) attach(p *Endpoint, done chan *command) {
+func (e *endpoint) attach(p *endpoint, done chan *command) {
 	cmd := &command{}
 	cmd.kind = attach
 	cmd.data = p
@@ -167,7 +168,7 @@ func (e *Endpoint) attach(p *Endpoint, done chan *command) {
 	e.cmdChan <- cmd
 }
 
-func (e *Endpoint) detachImpl(p *Endpoint) {
+func (e *endpoint) detachImpl(p *endpoint) {
 	n := len(e.bindings)
 	for i, v := range e.bindings {
 		if v == p {
@@ -182,9 +183,9 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 			}
 			if e.kind == recverType {
 				//for recver, if all senders detached
-				//send ChanCloseMsg to notify possible pending goroutine
+				//send chanCloseMsg to notify possible pending goroutine
 				if len(e.bindings) == 0 {
-					e.Chan <- ChanCloseMsg{}
+					e.Chan <- chanCloseMsg{}
 				}
 			}
 			return
@@ -192,7 +193,7 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 	}
 }
 
-func (e *Endpoint) detach(p *Endpoint) {
+func (e *endpoint) detach(p *endpoint) {
 	cmd := &command{}
 	cmd.kind = detach
 	cmd.data = p

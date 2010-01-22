@@ -8,8 +8,8 @@ TARG=router
 
 # source files in package
 GOFILES=\
-	id.go\
 	router.go\
+	id.go\
 	endpoint.go\
 	dispatcher.go\
 	notifier.go\
@@ -25,8 +25,8 @@ GOFILES=\
 GOTESTFILES=
 
 
-# build "main" executable
-all: test1 chatcli chatsrv pingpong1 pingpong2 pingpong3
+# build executables
+all: test1 chatcli chatsrv pingpong1 pingpong2 pingpong3 client server
 test1: package
 	$(GC) -I_obj test1.go
 	$(LD) -L_obj -o $@ test1.$O
@@ -57,6 +57,24 @@ pingpong3: package
 	$(LD) -L_obj -o $@ pingpong3.$O
 	@echo "Done. Executable is: $@"
 
+client: package
+	$(GC) -I_obj samples/dummyserver/client.go
+	$(LD) -L_obj -o $@ client.$O
+	@echo "Done. Executable is: $@"
+
+DummyServerFiles=\
+	samples/dummyserver/server.go\
+	samples/dummyserver/servant.go\
+	samples/dummyserver/dbtask.go\
+	samples/dummyserver/faultmgrtask.go\
+	samples/dummyserver/svctask.go\
+	samples/dummyserver/sysmgrtask.go\
+
+server: package
+	$(GC) -I_obj -o server.$O $(DummyServerFiles)
+	$(LD) -L_obj -o $@ server.$O
+	@echo "Done. Executable is: $@"
+
 clean:
 	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main
 
@@ -78,6 +96,9 @@ _test/$(TARG).a: _gotest_.$O
 # compile
 _go_.$O: $(GOFILES)
 	$(GC) -o $@ $(GOFILES)
+
+_dummy_.$O: $(DummyServerFiles)
+	$(GC) -I_obj -o $@ $(DummyServerFiles)
 
 # compile tests
 _gotest_.$O: $(GOFILES) $(GOTESTFILES)
