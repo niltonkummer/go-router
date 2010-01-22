@@ -1,0 +1,795 @@
+<!--
+Copyright 2009 The Go Authors. All rights reserved.
+Use of this source code is governed by a BSD-style
+license that can be found in the LICENSE file.
+-->
+
+<!-- PackageName is printed as title by the top-level template -->
+<p><code>import "router"</code></p>
+<p>
+&#34;router&#34; is a Go package for remote channel communication, based on peer-peer pub/sub model.
+Basically we attach a send channel to an id in router to send messages, and attach a recv channel to
+an id to receive messages. If these 2 ids match, the messages from send channel will be &#34;routed&#34; to recv channel, e.g.
+</p>
+<pre>rot := router.New(...)
+chan1 := make(chan string)
+chan2 := make(chan string)
+chan3 := make(chan string)
+rot.AttachSendChan(PathID(&#34;/sports/basketball&#34;), chan1)
+rot.AttachRecvChan(PathID(&#34;/sports/basketball&#34;), chan2)
+rot.AttachRecvChan(PathID(&#34;/sports/*&#34;), chan3)
+</pre>
+<p>
+We can use integers, strings, pathnames, or structs as Ids in router (maybe regex ids
+and tuple id in future).
+</p>
+<p>
+we can connect two routers so that channels attached to router1 can communicate with
+channels attached to router2 transparently.
+</p>
+
+<p>
+<h4>Package files</h4>
+<span style="font-size:90%">
+<a href="/src/pkg/router/dispatcher.go">dispatcher.go</a>
+<a href="/src/pkg/router/endpoint.go">endpoint.go</a>
+<a href="/src/pkg/router/filtrans.go">filtrans.go</a>
+<a href="/src/pkg/router/id.go">id.go</a>
+<a href="/src/pkg/router/logfault.go">logfault.go</a>
+<a href="/src/pkg/router/marshaler.go">marshaler.go</a>
+<a href="/src/pkg/router/msg.go">msg.go</a>
+<a href="/src/pkg/router/notifier.go">notifier.go</a>
+<a href="/src/pkg/router/proxy.go">proxy.go</a>
+<a href="/src/pkg/router/router.go">router.go</a>
+<a href="/src/pkg/router/stream.go">stream.go</a>
+<a href="/src/pkg/router/utils.go">utils.go</a>
+</span>
+</p>
+<h2 id="Constants">Constants</h2>
+<p>
+Default size settings in router
+</p>
+
+<pre>const (
+    DefLogBufSize      = 256
+    DefDataChanBufSize = 32
+    DefCmdChanBufSize  = 64
+    DefBindingSetSize  = 8
+)</pre>
+<p>
+Membership identifies whether communicating peers (send chans and recv chans) are from the same router or diff routers
+</p>
+
+<pre>const (
+    MemberLocal  = iota //peers (send chans and recv chans) are from the same router
+    MemberRemote        //peers (send chans and recv chans) are from diff routers
+    NumMembership
+)</pre>
+<p>
+Scope is the scope to publish/subscribe (or send/recv) msgs
+</p>
+
+<pre>const (
+    ScopeGlobal = iota // send to or recv from both local and remote peers
+    ScopeRemote        // send to or recv from remote peers
+    ScopeLocal         // send to or recv from local peers
+    NumScope
+)</pre>
+<p>
+Indices for sys msgs, used for creating SysIds
+</p>
+
+<pre>const (
+    RouterConnId = iota
+    RouterDisconnId
+    ConnErrorId
+    ConnReadyId
+    PubId
+    UnPubId
+    SubId
+    UnSubId
+    NumSysIds
+)</pre>
+<p>
+Some system level internal ids (for router internal logging and fault reporting)
+</p>
+
+<pre>const (
+    RouterLogId = NumSysIds + iota
+    RouterFaultId
+    NumSysInternalIds
+)</pre>
+<h2 id="Variables">Variables</h2>
+
+<pre>var IntSysIdBase int = -10101 //Base value for SysIds of IntId</pre>
+
+<pre>var PathSysIdBase string = &#34;/10101&#34; //Base value for SysIds of PathId</pre>
+
+<pre>var StrSysIdBase string = &#34;-10101&#34; //Base value for SysIds of StrId</pre>
+<h2 id="Broadcast">func <a href="/src/pkg/router/dispatcher.go#L45">Broadcast</a></h2>
+<p><code>func Broadcast(v interface{}, recvers []*endpoint)</code></p>
+<p>
+Simple broadcast is a plain function
+</p>
+
+<h2 id="ExportedId">func <a href="/src/pkg/router/id.go#L108">ExportedId</a></h2>
+<p><code>func ExportedId(id Id) bool</code></p>
+<p>
+A function used as predicate in router.idsForSend()/idsForRecv() to find all ids in a router&#39;s
+namespace which are exported to outside
+</p>
+
+<h2 id="MemberString">func <a href="/src/pkg/router/id.go#L24">MemberString</a></h2>
+<p><code>func MemberString(m int) string</code></p>
+<p>
+return the string values of membership
+</p>
+
+<h2 id="ScopeString">func <a href="/src/pkg/router/id.go#L43">ScopeString</a></h2>
+<p><code>func ScopeString(s int) string</code></p>
+<p>
+return string values of Scope
+</p>
+
+<h2 id="BindEvent">type <a href="/src/pkg/router/msg.go#L61">BindEvent</a></h2>
+<p>
+a message struct containing information for peer (sender/recver) binding/connection.
+sent by router whenever peer attached or detached.
+</p>
+<pre>Type:  the type of event just happened: PeerAttach/PeerDetach/EndOfData
+Count: how many peers are still bound now
+</pre>
+
+<p><pre>type BindEvent struct {
+    Type  BindEventType
+    Count int //total attached
+}</pre></p>
+<h2 id="BindEventType">type <a href="/src/pkg/router/msg.go#L49">BindEventType</a></h2>
+
+<p><pre>type BindEventType int8</pre></p>
+
+<pre>const (
+    PeerAttach BindEventType = iota
+    PeerDetach
+    EndOfData
+)</pre>
+<h2 id="ConnInfoMsg">type <a href="/src/pkg/router/msg.go#L43">ConnInfoMsg</a></h2>
+<p>
+a message struct containing information about remote router connection
+</p>
+
+<p><pre>type ConnInfoMsg struct {
+    ConnInfo string
+    Error    os.Error
+    SeedId   Id
+}</pre></p>
+<h2 id="Demarshaler">type <a href="/src/pkg/router/marshaler.go#L27">Demarshaler</a></h2>
+<p>
+the common interface of all demarshaler such as GobDemarshaler and JsonDemarshaler
+</p>
+
+<p><pre>type Demarshaler interface {
+    Demarshal(interface{}, reflect.Value) os.Error
+}</pre></p>
+<h2 id="DispatchFunc">type <a href="/src/pkg/router/dispatcher.go#L27">DispatchFunc</a></h2>
+<p>
+DispatchFunc is a wrapper to convert a plain function into a dispatcher
+</p>
+
+<p><pre>type DispatchFunc func(v interface{}, recvers []*endpoint)</pre></p>
+<h3 id="DispatchFunc.Dispatch">func (DispatchFunc) <a href="/src/pkg/router/dispatcher.go#L29">Dispatch</a></h3>
+<p><code>func (f DispatchFunc) Dispatch(v interface{}, recvers []*endpoint)</code></p>
+
+<h2 id="DispatchPolicy">type <a href="/src/pkg/router/dispatcher.go#L17">DispatchPolicy</a></h2>
+<p>
+DispatchPolicy is used to generate concrete dispatcher instances.
+For the kind of dispatcher which has no internal state, the same instance
+can be returned.
+</p>
+
+<p><pre>type DispatchPolicy interface {
+    NewDispatcher() Dispatcher
+}</pre></p>
+<p>
+BroadcastPolicy is used to generate broadcast dispatcher instances
+</p>
+
+<pre>var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })</pre>
+<p>
+RandomPolicy is used to generate random dispatchers
+</p>
+
+<pre>var RandomPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return NewRandomDispatcher() })</pre>
+<p>
+RoundRobinPolicy is ued to generate roundrobin dispatchers
+</p>
+
+<pre>var RoundRobinPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return NewRoundrobin() })</pre>
+<h2 id="Dispatcher">type <a href="/src/pkg/router/dispatcher.go#L22">Dispatcher</a></h2>
+<p>
+Dispatcher is the common interface of all dispatchers
+</p>
+
+<p><pre>type Dispatcher interface {
+    Dispatch(v interface{}, recvers []*endpoint)
+}</pre></p>
+<h2 id="FaultRaiser">type <a href="/src/pkg/router/logfault.go#L286">FaultRaiser</a></h2>
+<p>
+FaultRaiser can be embedded into user structs/ types, which then can call Raise() directly
+</p>
+
+<p><pre>type FaultRaiser struct {
+    // contains unexported fields
+}</pre></p>
+<h3 id="FaultRaiser.NewFaultRaiser">func <a href="/src/pkg/router/logfault.go#L292">NewFaultRaiser</a></h3>
+<p><code>func NewFaultRaiser(id Id, r Router, src string) *FaultRaiser</code></p>
+<p>
+create a new FaultRaiser to send FaultRecords to id in router &#34;r&#34;
+</p>
+
+<h3 id="FaultRaiser.Close">func (*FaultRaiser) <a href="/src/pkg/router/logfault.go#L304">Close</a></h3>
+<p><code>func (l *FaultRaiser) Close()</code></p>
+
+<h3 id="FaultRaiser.Init">func (*FaultRaiser) <a href="/src/pkg/router/logfault.go#L296">Init</a></h3>
+<p><code>func (l *FaultRaiser) Init(id Id, r Router, src string) *FaultRaiser</code></p>
+
+<h3 id="FaultRaiser.Raise">func (*FaultRaiser) <a href="/src/pkg/router/logfault.go#L311">Raise</a></h3>
+<p><code>func (r *FaultRaiser) Raise(msg os.Error)</code></p>
+<p>
+raise a fault - send a FaultRecord to faultId in router
+</p>
+
+<h2 id="FaultRecord">type <a href="/src/pkg/router/logfault.go#L227">FaultRecord</a></h2>
+<p>
+FaultRecord records some details about fault
+</p>
+
+<p><pre>type FaultRecord struct {
+    Source    string
+    Info      os.Error
+    Timestamp int64
+}</pre></p>
+<h2 id="Id">type <a href="/src/pkg/router/id.go#L65">Id</a></h2>
+<p>
+Id defines the common interface shared by all kinds of ids: integers/strings/pathnames...
+</p>
+
+<p><pre>type Id interface {
+    //methods to query Id content
+    Scope() int
+    Member() int
+
+    //key value for storing Id in map
+    Key() interface{}
+
+    //for id matching
+    Match(Id) bool
+    MatchType() MatchType
+
+    //Generators for creating other ids of same type. Since often we don&#39;t
+    //know the exact types of Id.Val, so we have to create new ones from an existing id
+    SysID(int, ...) (Id, os.Error) //generate sys ids, also called as method of Router
+    Clone(...) (Id, os.Error)      //create a new id with same id, but possible diff scope &amp; membership
+
+    //Stringer interface
+    String() string
+}</pre></p>
+<p>
+Some dummy ids, often used as seedId when creating router
+</p>
+
+<pre>var (
+    DummyIntId  Id = &amp;IntId{Val: -10201}
+    DummyStrId  Id = &amp;StrId{Val: &#34;-10201&#34;}
+    DummyPathId Id = &amp;PathId{Val: &#34;-10201&#34;}
+    DummyMsgId  Id = &amp;MsgId{Val: MsgTag{-10201, -10201}}
+)</pre>
+<h3 id="Id.IntID">func <a href="/src/pkg/router/id.go#L416">IntID</a></h3>
+<p><code>func IntID(args ...) Id</code></p>
+<p>
+IntId constructor, accepting the following arguments:
+</p>
+<pre>Val       int
+ScopeVal  int
+MemberVal int
+</pre>
+
+<h3 id="Id.MsgID">func <a href="/src/pkg/router/id.go#L516">MsgID</a></h3>
+<p><code>func MsgID(args ...) Id</code></p>
+<p>
+MsgId constructor, accepting the following arguments:
+</p>
+<pre>Family    int
+Tag       int
+ScopeVal  int
+MemberVal int
+</pre>
+
+<h3 id="Id.PathID">func <a href="/src/pkg/router/id.go#L481">PathID</a></h3>
+<p><code>func PathID(args ...) Id</code></p>
+<p>
+PathId constructor, accepting the following arguments:
+</p>
+<pre>Val       string (path names, such as /sport/basketball/news/...)
+ScopeVal  int
+MemberVal int
+</pre>
+
+<h3 id="Id.StrID">func <a href="/src/pkg/router/id.go#L447">StrID</a></h3>
+<p><code>func StrID(args ...) Id</code></p>
+<p>
+StrId constructor, accepting the following arguments:
+</p>
+<pre>Val       string
+ScopeVal  int
+MemberVal int
+</pre>
+
+<h2 id="IdChanInfo">type <a href="/src/pkg/router/msg.go#L25">IdChanInfo</a></h2>
+<p>
+a message struct holding information about id and its associated ChanType
+</p>
+
+<p><pre>type IdChanInfo struct {
+    Id       Id
+    ChanType *reflect.ChanType
+    ElemType *chanElemTypeData
+}</pre></p>
+<h2 id="IdChanInfoMsg">type <a href="/src/pkg/router/msg.go#L32">IdChanInfoMsg</a></h2>
+<p>
+a message struct for propagating router&#39;s namespace changes (chan attachments or detachments)
+</p>
+
+<p><pre>type IdChanInfoMsg struct {
+    Info []*IdChanInfo
+}</pre></p>
+<h2 id="IdFilter">type <a href="/src/pkg/router/filtrans.go#L20">IdFilter</a></h2>
+<p>
+IdFilter: the common interface of filters. concrete filters
+should be defined by apps with app-specific rules.
+if no filter defined, there is no id filtering.
+</p>
+<pre>1. bound with specific proxy
+2. defines which ids can pass in / out to router thru this proxy
+3. only filter the ids of application msgs (NOT system msgs),
+   only used in processing namespace change msgs: PubId/SubId
+4. by default, if no filter is defined, everything is allowed
+5. filters are used against ids in local namespace, not translated ones
+</pre>
+
+<p><pre>type IdFilter interface {
+    BlockInward(Id) bool
+    BlockOutward(Id) bool
+}</pre></p>
+<h2 id="IdTranslator">type <a href="/src/pkg/router/filtrans.go#L36">IdTranslator</a></h2>
+<p>
+IdTransltor: the common interface of translators.
+concrete transltors should be defined by apps with app-specific rules.
+if no translator defined, there is no id transltions.
+</p>
+<pre>1. bound with specific proxy
+2. translate ids of in / out msgs thru this proxy, effectively &#34;mount&#34; the msgs
+    thru this proxy / conn to a subrange of router&#39;s id space
+3. only translate the ids of application msgs (NOT system msgs), and it will affect the
+    ids of every app msgs passed thru this proxy - must be highly efficient
+4. by default, if no translator is defined, no translation
+</pre>
+
+<p><pre>type IdTranslator interface {
+    TranslateInward(Id) Id
+    TranslateOutward(Id) Id
+}</pre></p>
+<h2 id="IntId">type <a href="/src/pkg/router/id.go#L113">IntId</a></h2>
+<p>
+Use integer as ids in router
+</p>
+
+<p><pre>type IntId struct {
+    Val       int
+    ScopeVal  int
+    MemberVal int
+}</pre></p>
+<h3 id="IntId.Clone">func (IntId) <a href="/src/pkg/router/id.go#L119">Clone</a></h3>
+<p><code>func (id IntId) Clone(args ...) (nnid Id, err os.Error)</code></p>
+
+<h3 id="IntId.Key">func (IntId) <a href="/src/pkg/router/id.go#L136">Key</a></h3>
+<p><code>func (id IntId) Key() interface{}</code></p>
+
+<h3 id="IntId.Match">func (IntId) <a href="/src/pkg/router/id.go#L138">Match</a></h3>
+<p><code>func (id1 IntId) Match(id2 Id) bool</code></p>
+
+<h3 id="IntId.MatchType">func (IntId) <a href="/src/pkg/router/id.go#L145">MatchType</a></h3>
+<p><code>func (id IntId) MatchType() MatchType</code></p>
+
+<h3 id="IntId.Member">func (IntId) <a href="/src/pkg/router/id.go#L148">Member</a></h3>
+<p><code>func (id IntId) Member() int</code></p>
+
+<h3 id="IntId.Scope">func (IntId) <a href="/src/pkg/router/id.go#L147">Scope</a></h3>
+<p><code>func (id IntId) Scope() int</code></p>
+
+<h3 id="IntId.String">func (IntId) <a href="/src/pkg/router/id.go#L149">String</a></h3>
+<p><code>func (id IntId) String() string</code></p>
+
+<h3 id="IntId.SysID">func (IntId) <a href="/src/pkg/router/id.go#L154">SysID</a></h3>
+<p><code>func (id IntId) SysID(indx int, args ...) (ssid Id, err os.Error)</code></p>
+
+<h2 id="LogPriority">type <a href="/src/pkg/router/logfault.go#L35">LogPriority</a></h2>
+
+<p><pre>type LogPriority int</pre></p>
+
+<pre>const (
+    LOG_INFO LogPriority = iota
+    LOG_DEBUG
+    LOG_WARN
+    LOG_ERROR
+)</pre>
+<h3 id="LogPriority.String">func (LogPriority) <a href="/src/pkg/router/logfault.go#L44">String</a></h3>
+<p><code>func (lp LogPriority) String() string</code></p>
+
+<h2 id="LogRecord">type <a href="/src/pkg/router/logfault.go#L59">LogRecord</a></h2>
+<p>
+LogRecord stores the log information
+</p>
+
+<p><pre>type LogRecord struct {
+    Pri       LogPriority
+    Source    string
+    Info      interface{}
+    Timestamp int64
+}</pre></p>
+<h2 id="LogSink">type <a href="/src/pkg/router/logfault.go#L160">LogSink</a></h2>
+<p>
+A simple log sink, showing log messages in console.
+</p>
+
+<p><pre>type LogSink struct {
+    // contains unexported fields
+}</pre></p>
+<h3 id="LogSink.NewLogSink">func <a href="/src/pkg/router/logfault.go#L166">NewLogSink</a></h3>
+<p><code>func NewLogSink(id Id, r Router) *LogSink</code></p>
+<p>
+create a new log sink, which receives log messages from id in router &#34;r&#34;
+</p>
+
+<h3 id="LogSink.Close">func (*LogSink) <a href="/src/pkg/router/logfault.go#L175">Close</a></h3>
+<p><code>func (l *LogSink) Close()</code></p>
+
+<h3 id="LogSink.Init">func (*LogSink) <a href="/src/pkg/router/logfault.go#L168">Init</a></h3>
+<p><code>func (l *LogSink) Init(id Id, r Router) *LogSink</code></p>
+
+<h2 id="Logger">type <a href="/src/pkg/router/logfault.go#L121">Logger</a></h2>
+<p>
+Logger can be embedded into user structs / types, which then can use Log() / LogError() directly
+</p>
+
+<p><pre>type Logger struct {
+    // contains unexported fields
+}</pre></p>
+<h3 id="Logger.NewLogger">func <a href="/src/pkg/router/logfault.go#L127">NewLogger</a></h3>
+<p><code>func NewLogger(id Id, r Router, src string) *Logger</code></p>
+<p>
+NewLogger will create a Logger object which sends log messages thru id in router &#34;r&#34;
+</p>
+
+<h3 id="Logger.Close">func (*Logger) <a href="/src/pkg/router/logfault.go#L139">Close</a></h3>
+<p><code>func (l *Logger) Close()</code></p>
+
+<h3 id="Logger.Init">func (*Logger) <a href="/src/pkg/router/logfault.go#L131">Init</a></h3>
+<p><code>func (l *Logger) Init(id Id, r Router, src string) *Logger</code></p>
+
+<h3 id="Logger.Log">func (*Logger) <a href="/src/pkg/router/logfault.go#L146">Log</a></h3>
+<p><code>func (r *Logger) Log(p LogPriority, msg interface{})</code></p>
+<p>
+send a log record to log id in router
+</p>
+
+<h3 id="Logger.LogError">func (*Logger) <a href="/src/pkg/router/logfault.go#L153">LogError</a></h3>
+<p><code>func (r *Logger) LogError(err os.Error)</code></p>
+<p>
+send a log record and store error info in it
+</p>
+
+<h2 id="Marshaler">type <a href="/src/pkg/router/marshaler.go#L22">Marshaler</a></h2>
+<p>
+the common interface of all marshaler such as GobMarshaler and JsonMarshaler
+</p>
+
+<p><pre>type Marshaler interface {
+    Marshal(interface{}) os.Error
+}</pre></p>
+<h2 id="MarshallingPolicy">type <a href="/src/pkg/router/marshaler.go#L32">MarshallingPolicy</a></h2>
+<p>
+the common interface of all Marshaling policy such as GobMarshaling and JsonMarshaling
+</p>
+
+<p><pre>type MarshallingPolicy interface {
+    NewMarshaler(io.Writer) Marshaler
+    NewDemarshaler(io.Reader) Demarshaler
+}</pre></p>
+<p>
+use package &#34;gob&#34; for marshaling
+</p>
+
+<pre>var GobMarshaling MarshallingPolicy = gobMarshallingPolicy(0)</pre>
+<p>
+use package &#34;json&#34; for marshaling
+</p>
+
+<pre>var JsonMarshaling MarshallingPolicy = jsonMarshallingPolicy(1)</pre>
+<h2 id="MatchType">type <a href="/src/pkg/router/id.go#L56">MatchType</a></h2>
+<p>
+MatchType describes the types of namespaces and match algorithms used for id-matching
+</p>
+
+<p><pre>type MatchType int</pre></p>
+
+<pre>const (
+    ExactMatch  MatchType = iota
+    PrefixMatch           // for PathId
+    AssocMatch            // for RegexId, TupleId
+)</pre>
+<h2 id="MsgId">type <a href="/src/pkg/router/id.go#L335">MsgId</a></h2>
+
+<p><pre>type MsgId struct {
+    Val       MsgTag
+    ScopeVal  int
+    MemberVal int
+}</pre></p>
+<h3 id="MsgId.Clone">func (MsgId) <a href="/src/pkg/router/id.go#L341">Clone</a></h3>
+<p><code>func (id MsgId) Clone(args ...) (nnid Id, err os.Error)</code></p>
+
+<h3 id="MsgId.Key">func (MsgId) <a href="/src/pkg/router/id.go#L358">Key</a></h3>
+<p><code>func (id MsgId) Key() interface{}</code></p>
+
+<h3 id="MsgId.Match">func (MsgId) <a href="/src/pkg/router/id.go#L360">Match</a></h3>
+<p><code>func (id1 MsgId) Match(id2 Id) bool</code></p>
+
+<h3 id="MsgId.MatchType">func (MsgId) <a href="/src/pkg/router/id.go#L368">MatchType</a></h3>
+<p><code>func (id MsgId) MatchType() MatchType</code></p>
+
+<h3 id="MsgId.Member">func (MsgId) <a href="/src/pkg/router/id.go#L371">Member</a></h3>
+<p><code>func (id MsgId) Member() int</code></p>
+
+<h3 id="MsgId.Scope">func (MsgId) <a href="/src/pkg/router/id.go#L370">Scope</a></h3>
+<p><code>func (id MsgId) Scope() int</code></p>
+
+<h3 id="MsgId.String">func (MsgId) <a href="/src/pkg/router/id.go#L372">String</a></h3>
+<p><code>func (id MsgId) String() string</code></p>
+
+<h3 id="MsgId.SysID">func (MsgId) <a href="/src/pkg/router/id.go#L377">SysID</a></h3>
+<p><code>func (id MsgId) SysID(indx int, args ...) (ssid Id, err os.Error)</code></p>
+
+<h2 id="MsgTag">type <a href="/src/pkg/router/id.go#L328">MsgTag</a></h2>
+<p>
+Use a common msgTag as Id
+</p>
+
+<p><pre>type MsgTag struct {
+    Family int //divide all msgs into families: system, fault, provision,...
+    Tag    int //further division inside a family
+}</pre></p>
+
+<pre>var MsgSysIdBase MsgTag = MsgTag{-10101, -10101} //Base value for SysIds of MsgId</pre>
+<h3 id="MsgTag.String">func (MsgTag) <a href="/src/pkg/router/id.go#L333">String</a></h3>
+<p><code>func (t MsgTag) String() string</code></p>
+
+<h2 id="PathId">type <a href="/src/pkg/router/id.go#L240">PathId</a></h2>
+<p>
+Use file-system like pathname as ids
+PathId has diff Match() algo from StrId
+</p>
+
+<p><pre>type PathId struct {
+    Val       string
+    ScopeVal  int
+    MemberVal int
+}</pre></p>
+<h3 id="PathId.Clone">func (PathId) <a href="/src/pkg/router/id.go#L246">Clone</a></h3>
+<p><code>func (id PathId) Clone(args ...) (nnid Id, err os.Error)</code></p>
+
+<h3 id="PathId.Key">func (PathId) <a href="/src/pkg/router/id.go#L263">Key</a></h3>
+<p><code>func (id PathId) Key() interface{}</code></p>
+
+<h3 id="PathId.Match">func (PathId) <a href="/src/pkg/router/id.go#L265">Match</a></h3>
+<p><code>func (id1 PathId) Match(id2 Id) bool</code></p>
+
+<h3 id="PathId.MatchType">func (PathId) <a href="/src/pkg/router/id.go#L297">MatchType</a></h3>
+<p><code>func (id PathId) MatchType() MatchType</code></p>
+
+<h3 id="PathId.Member">func (PathId) <a href="/src/pkg/router/id.go#L300">Member</a></h3>
+<p><code>func (id PathId) Member() int</code></p>
+
+<h3 id="PathId.Scope">func (PathId) <a href="/src/pkg/router/id.go#L299">Scope</a></h3>
+<p><code>func (id PathId) Scope() int</code></p>
+
+<h3 id="PathId.String">func (PathId) <a href="/src/pkg/router/id.go#L301">String</a></h3>
+<p><code>func (id PathId) String() string</code></p>
+
+<h3 id="PathId.SysID">func (PathId) <a href="/src/pkg/router/id.go#L306">SysID</a></h3>
+<p><code>func (id PathId) SysID(indx int, args ...) (ssid Id, err os.Error)</code></p>
+
+<h2 id="PolicyFunc">type <a href="/src/pkg/router/dispatcher.go#L33">PolicyFunc</a></h2>
+
+<p><pre>type PolicyFunc func() Dispatcher</pre></p>
+<h3 id="PolicyFunc.NewDispatcher">func (PolicyFunc) <a href="/src/pkg/router/dispatcher.go#L35">NewDispatcher</a></h3>
+<p><code>func (f PolicyFunc) NewDispatcher() Dispatcher</code></p>
+
+<h2 id="Proxy">type <a href="/src/pkg/router/proxy.go#L27">Proxy</a></h2>
+<p>
+Proxy is the primary interface to connect router to its peer router.
+At both ends of a connection, there is a proxy object for its router.
+Simple router connection can be set up thru calling Router.Connect().
+Proxy.Connect() can be used to set up more complicated connections,
+such as setting IdFilter to allow only a subset of messages pass thru
+the connection, or setting IdTranslator which can &#34;relocate&#34; remote message
+ids into a subspace in local router&#39;s namespace.
+Proxy.Close() is called to disconnect router from its peer.
+</p>
+
+<p><pre>type Proxy interface {
+    Connect(Proxy) os.Error
+    ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) os.Error
+    Start()
+    Close()
+}</pre></p>
+<h3 id="Proxy.NewProxy">func <a href="/src/pkg/router/proxy.go#L90">NewProxy</a></h3>
+<p><code>func NewProxy(r Router, name string, f IdFilter, t IdTranslator) Proxy</code></p>
+<p>
+Proxy constructor. It accepts the following arguments:
+</p>
+<pre>1. r:    the router which will be bound with this proxy and be owner of this proxy
+2. name: proxy&#39;s name, used in log messages if owner router&#39;s log is turned on
+3. f:    IdFilter to be installed at this proxy
+4. t:    IdTranslator to be installed at this proxy
+</pre>
+
+<h2 id="RandomDispatcher">type <a href="/src/pkg/router/dispatcher.go#L82">RandomDispatcher</a></h2>
+<p>
+Random dispatcher
+</p>
+
+<p><pre>type RandomDispatcher rand.Rand</pre></p>
+<h3 id="RandomDispatcher.NewRandomDispatcher">func <a href="/src/pkg/router/dispatcher.go#L84">NewRandomDispatcher</a></h3>
+<p><code>func NewRandomDispatcher() *RandomDispatcher</code></p>
+
+<h3 id="RandomDispatcher.Dispatch">func (*RandomDispatcher) <a href="/src/pkg/router/dispatcher.go#L88">Dispatch</a></h3>
+<p><code>func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*endpoint)</code></p>
+
+<h2 id="Roundrobin">type <a href="/src/pkg/router/dispatcher.go#L57">Roundrobin</a></h2>
+<p>
+Roundrobin dispatcher will keep the &#34;next&#34; index as its state
+</p>
+
+<p><pre>type Roundrobin struct {
+    // contains unexported fields
+}</pre></p>
+<h3 id="Roundrobin.NewRoundrobin">func <a href="/src/pkg/router/dispatcher.go#L61">NewRoundrobin</a></h3>
+<p><code>func NewRoundrobin() *Roundrobin</code></p>
+
+<h3 id="Roundrobin.Dispatch">func (*Roundrobin) <a href="/src/pkg/router/dispatcher.go#L63">Dispatch</a></h3>
+<p><code>func (r *Roundrobin) Dispatch(v interface{}, recvers []*endpoint)</code></p>
+
+<h2 id="Router">type <a href="/src/pkg/router/router.go#L46">Router</a></h2>
+<p>
+Router is the main access point to functionality. Applications will create an instance
+of it thru router.New(...) and attach channels to it
+</p>
+
+<p><pre>type Router interface {
+    //---- core api ----
+    //Attach chans to id in router, with an optional argument (chan BindEvent)
+    //When specified, the optional argument will serve two purposes:
+    //1. used to tell when other ends connecting/disconn
+    //2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
+    AttachSendChan(Id, interface{}, ...) os.Error
+    AttachRecvChan(Id, interface{}, ...) os.Error
+
+    //Detach sendChan/recvChan from router
+    DetachChan(Id, interface{}) os.Error
+
+    //Shutdown router
+    Close()
+
+    //Connect this router to another router.
+    //1. internally it calls Proxy.Connect(...) to do the real job
+    //2. The connection can be disconnected by calling Proxy.Close() on returned proxy object
+    //3. for more compilcated connection setup (such as setting IdFilter and IdTranslator), use Proxy.Connect() instead
+    //Connect to a local router
+    Connect(Router) (Proxy, Proxy, os.Error)
+
+    //Connect to a remote router thru io conn
+    ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
+
+    //--- other utils ---
+    //return pre-created SysIds according to the router&#39;s id-type, with ScopeGlobal / MemberLocal
+    SysID(idx int) Id
+
+    //create a new SysId with &#34;args...&#34; specifying scope/membership
+    NewSysID(idx int, args ...) Id
+
+    //return all ids and their ChanTypes from router&#39;s namespace which satisfy predicate
+    IdsForSend(predicate func(id Id) bool) map[interface{}]*IdChanInfo
+    IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdChanInfo
+}</pre></p>
+<h3 id="Router.New">func <a href="/src/pkg/router/router.go#L772">New</a></h3>
+<p><code>func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router</code></p>
+<p>
+New is router constructor. It accepts the following arguments:
+</p>
+<pre>1. seedId: a dummy id to show what type of ids will be used. New ids will be type-checked against this.
+2. bufSize: by default, 32 is the default size for router&#39;s internal channels.
+            if bufSize &gt; 0, its value will be used.
+3. disp: dispatch policy for router. by default, it is BroadcastPolicy
+4. optional arguments ...:
+        name:     router&#39;s name, if name is defined, router internal logging will be turned on,
+                  ie LogRecord generated
+        LogScope: if this is set, a console log sink is installed to show router internal log
+                  if logScope == ScopeLocal, only log msgs from local router will show up
+                  if logScope == ScopeGlobal, all log msgs from connected routers will show up
+</pre>
+
+<h2 id="StrId">type <a href="/src/pkg/router/id.go#L176">StrId</a></h2>
+<p>
+Use strings as ids in router
+</p>
+
+<p><pre>type StrId struct {
+    Val       string
+    ScopeVal  int
+    MemberVal int
+}</pre></p>
+<h3 id="StrId.Clone">func (StrId) <a href="/src/pkg/router/id.go#L182">Clone</a></h3>
+<p><code>func (id StrId) Clone(args ...) (nnid Id, err os.Error)</code></p>
+
+<h3 id="StrId.Key">func (StrId) <a href="/src/pkg/router/id.go#L199">Key</a></h3>
+<p><code>func (id StrId) Key() interface{}</code></p>
+
+<h3 id="StrId.Match">func (StrId) <a href="/src/pkg/router/id.go#L201">Match</a></h3>
+<p><code>func (id1 StrId) Match(id2 Id) bool</code></p>
+
+<h3 id="StrId.MatchType">func (StrId) <a href="/src/pkg/router/id.go#L208">MatchType</a></h3>
+<p><code>func (id StrId) MatchType() MatchType</code></p>
+
+<h3 id="StrId.Member">func (StrId) <a href="/src/pkg/router/id.go#L211">Member</a></h3>
+<p><code>func (id StrId) Member() int</code></p>
+
+<h3 id="StrId.Scope">func (StrId) <a href="/src/pkg/router/id.go#L210">Scope</a></h3>
+<p><code>func (id StrId) Scope() int</code></p>
+
+<h3 id="StrId.String">func (StrId) <a href="/src/pkg/router/id.go#L212">String</a></h3>
+<p><code>func (id StrId) String() string</code></p>
+
+<h3 id="StrId.SysID">func (StrId) <a href="/src/pkg/router/id.go#L217">SysID</a></h3>
+<p><code>func (id StrId) SysID(indx int, args ...) (ssid Id, err os.Error)</code></p>
+
+<h2 id="Subdirectories">Subdirectories</h2>
+<p>
+<table class="layout">
+<tr>
+<th align="left" colspan="1">Name</th>
+<td width="25">&nbsp;</td>
+<th align="left">Synopsis</th>
+</tr>
+<tr>
+<th align="left"><a href="..">..<a></th>
+</tr>
+<tr>
+
+<td align="left" colspan="1"><a href="PackageRouterAPI_files">PackageRouterAPI_files<a></td>
+<td></td>
+<td align="left"></td>
+</tr>
+<tr>
+
+<td align="left" colspan="1"><a href="docs">docs<a></td>
+<td></td>
+<td align="left"></td>
+</tr>
+<tr>
+
+<td align="left" colspan="1"><a href="samples">samples<a></td>
+<td></td>
+<td align="left"></td>
+</tr>
+</table>
+</p>
