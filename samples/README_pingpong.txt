@@ -36,5 +36,8 @@ the routers.
 
 In the above three configurations, Pinger and Ponger's interface and code remain
 the same, the only thing changed is the way we set up channel connection between them.
+As long as their interacting channels (pingChan & pongChan) are properly set up,
+Pinger and Ponger can function correctly, no matter they are connected to the same
+router in same address space, or connected thru sockets running in separate processes.
 
 

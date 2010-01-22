@@ -1,6 +1,5 @@
 //
 // Copyright (c) 2010 Yigong Liu
-//
 // Distributed under New BSD License
 //
 package main

@@ -10,21 +10,23 @@ import (
 //pinger: send to ping chan, recv from pong chan
 type Pinger struct {
 	//Pinger's public interface
-	pingChan chan<-string
+	pingChan chan<- string
 	pongChan <-chan string
-	done chan<-bool
+	done     chan<- bool
 	//Pinger's private state
-	numRuns int   //how many times should we ping-pong
-	count int
+	numRuns int //how many times should we ping-pong
+	count   int
 }
-	
+
 func (p *Pinger) Run() {
 	p.count = 0
 	for v := range p.pongChan {
 		fmt.Println("Pinger recv: ", v)
 		ind := strings.Index(v, ":")
-		p.count,_ = strconv.Atoi(v[ind+1:])
-		if p.count > p.numRuns { break }
+		p.count, _ = strconv.Atoi(v[ind+1:])
+		if p.count > p.numRuns {
+			break
+		}
 		p.count++
 		p.pingChan <- fmt.Sprintf("hello from Pinger :%d", p.count)
 	}
@@ -32,7 +34,7 @@ func (p *Pinger) Run() {
 	p.done <- true
 }
 
-func newPinger(pingChan chan<-string, pongChan <-chan string, done chan<-bool, numRuns int) {
+func newPinger(pingChan chan<- string, pongChan <-chan string, done chan<- bool, numRuns int) {
 	//start pinger
 	ping := &Pinger{pingChan, pongChan, done, numRuns, 0}
 	go ping.Run()
@@ -41,9 +43,9 @@ func newPinger(pingChan chan<-string, pongChan <-chan string, done chan<-bool, n
 //ponger: send to pong chan, recv from ping chan
 type Ponger struct {
 	//Ponger's public interface
-	pongChan chan<-string
+	pongChan chan<- string
 	pingChan <-chan string
-	done chan<-bool
+	done     chan<- bool
 	//Ponger's private state
 	count int
 }
@@ -54,7 +56,7 @@ func (p *Ponger) Run() {
 	for v := range p.pingChan {
 		fmt.Println("Ponger recv: ", v)
 		ind := strings.Index(v, ":")
-		p.count,_ = strconv.Atoi(v[ind+1:])
+		p.count, _ = strconv.Atoi(v[ind+1:])
 		p.count++
 		p.pongChan <- fmt.Sprintf("hello from Ponger :%d", p.count)
 	}
@@ -62,7 +64,7 @@ func (p *Ponger) Run() {
 	p.done <- true
 }
 
-func newPonger(pongChan chan<-string, pingChan <-chan string, done chan<-bool) {
+func newPonger(pongChan chan<- string, pingChan <-chan string, done chan<- bool) {
 	//start ponger
 	pong := &Ponger{pongChan, pingChan, done, 0}
 	go pong.Run()
@@ -74,7 +76,7 @@ func main() {
 		fmt.Println("Usage: pingpong1 num_runs")
 		return
 	}
-	numRuns,_ := strconv.Atoi(flag.Arg(0))
+	numRuns, _ := strconv.Atoi(flag.Arg(0))
 	//alloc comm chans between Pinger and Ponger
 	pingChan := make(chan string)
 	pongChan := make(chan string)
@@ -86,4 +88,3 @@ func main() {
 	<-done
 	<-done
 }
-
