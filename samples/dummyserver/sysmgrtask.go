@@ -14,7 +14,7 @@ import (
 
 /*
  SystemManagerTask: perform overall system management
- SysteManager at standby servant monitors the heartbeat from active server, if 3 heartbeat miss in a row, standby will become active and start serving user requests
+ SysteManager at standby servant monitors the heartbeat from active server, if 2 heartbeat miss in a row, standby will become active and start serving user requests
  SystemManager at active servant will send heartbeats to standby, send command msgs to subordinate tasks to control their life cycle
  SystemManager will monitor client connections and create ServiceTask on demand
  SysMgrTask has the following messaging interface:
@@ -81,6 +81,11 @@ func (smt *SysMgrTask) Run(r router.Router, n string, role ServantRole) {
 			case _ = <-smt.startChan:
 				//active servant stopped, change my role to active
 				smt.role = Active
+				//drain remaining out-of-date OOS msgs
+				_, ok := <-smt.sysOOSChan
+				for ok {
+					_, ok = <-smt.sysOOSChan
+				}
 				//ask all child tasks coming up to service
 				smt.sysCmdChan <- "Start"
 				//start sending heartbeat to standby
@@ -215,14 +220,12 @@ func (smt *SysMgrTask) monitorActiveHeartbeat() {
 	miss := 0
 	//first block wait for active servant coming up
 	<-smt.htbtRecvChan
-	//tell my subordinate tasks to stop if they are still active
-	//smt.sysCmdChan <- "Stop"
 	//drain remaining out-of-date heartbeats, if the standby coming up late
 	_, ok := <-smt.htbtRecvChan
 	for ok {
 		_, ok = <-smt.htbtRecvChan
 	}
-	//start heartbeat monitoring, standby servant should recv about 3 heartbeats per second from
+	//start heartbeat monitoring, standby servant should recv about 4-5 heartbeats per second from
 	//active servant, otherwise, it will come up as active
 	for {
 		time.Sleep(2e8)
@@ -243,7 +246,7 @@ func (smt *SysMgrTask) monitorActiveHeartbeat() {
 
 func (smt *SysMgrTask) sendHeartbeat() {
 	fmt.Println(smt.name, " enter send heartbeat")
-	//send a heartbeat to standby servant every 1/3 second
+	//send a heartbeat to standby servant every 1/5 second
 	for {
 		//check if should stop heartbeating
 		_, ok := <-smt.stopChan
