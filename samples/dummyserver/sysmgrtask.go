@@ -36,13 +36,13 @@ type SysMgrTask struct {
 	role          ServantRole
 	rot           router.Router
 	name          string
-	childBindChan chan router.BindEvent
+	childBindChan chan *router.BindEvent
 	stopChan      chan bool
 	startChan     chan bool
-	pubChan       chan router.IdChanInfoMsg
-	unpubChan     chan router.IdChanInfoMsg
-	pubBindChan   chan router.BindEvent
-	unpubBindChan chan router.BindEvent
+	pubChan       chan *router.IdChanInfoMsg
+	unpubChan     chan *router.IdChanInfoMsg
+	pubBindChan   chan *router.BindEvent
+	unpubBindChan chan *router.BindEvent
 }
 
 func NewSysMgrTask(r router.Router, n string, role ServantRole) *SysMgrTask {
@@ -182,7 +182,7 @@ func (smt *SysMgrTask) init(r router.Router, n string, role ServantRole) {
 	smt.htbtRecvChan = make(chan *time.Time)
 	smt.sysCmdChan = make(chan string)
 	smt.sysOOSChan = make(chan string)
-	smt.childBindChan = make(chan router.BindEvent, 1)
+	smt.childBindChan = make(chan *router.BindEvent, 1)
 	smt.startChan = make(chan bool, 1)
 	smt.stopChan = make(chan bool, 1)
 	//output_intf or send chans
@@ -192,12 +192,12 @@ func (smt *SysMgrTask) init(r router.Router, n string, role ServantRole) {
 	smt.rot.AttachRecvChan(router.StrID("/Sys/Ctrl/Heartbeat", router.ScopeRemote), smt.htbtRecvChan)
 	smt.rot.AttachRecvChan(router.StrID("/Sys/OutOfService"), smt.sysOOSChan)
 	//
-	smt.pubChan = make(chan router.IdChanInfoMsg)
-	smt.unpubChan = make(chan router.IdChanInfoMsg)
+	smt.pubChan = make(chan *router.IdChanInfoMsg)
+	smt.unpubChan = make(chan *router.IdChanInfoMsg)
 	//use pubBindChan/unpubBindChan when attaching chans to PubId/UnPubId, so that they will not be
 	//closed when all clients close and leave
-	smt.pubBindChan = make(chan router.BindEvent, 1)
-	smt.unpubBindChan = make(chan router.BindEvent, 1)
+	smt.pubBindChan = make(chan *router.BindEvent, 1)
+	smt.unpubBindChan = make(chan *router.BindEvent, 1)
 	smt.rot.AttachRecvChan(smt.rot.NewSysID(router.PubId, router.ScopeRemote), smt.pubChan, smt.pubBindChan)
 	smt.rot.AttachRecvChan(smt.rot.NewSysID(router.UnPubId, router.ScopeRemote), smt.unpubChan, smt.unpubBindChan)
 }

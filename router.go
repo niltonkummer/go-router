@@ -45,7 +45,8 @@ const (
 //of it thru router.New(...) and attach channels to it
 type Router interface {
 	//---- core api ----
-	//Attach chans to id in router, with an optional argument (chan BindEvent)
+	//Attach chans to id in router, with an optional argument (chan *BindEvent)
+	//currently only accept the following chan types: chan bool/int/float/string/*struct
 	//When specified, the optional argument will serve two purposes:
 	//1. used to tell when other ends connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
@@ -202,28 +203,53 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 	return
 }
 
+func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
+	ok := false
+	ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+	if !ok {
+		err = os.ErrorString(errInvalidChan)
+		return
+	}
+	et := ch.Type().(*reflect.ChanType).Elem()
+	switch et := et.(type) {
+	case *reflect.BoolType:
+	case *reflect.IntType:
+	case *reflect.FloatType:
+	case *reflect.StringType:
+	case *reflect.PtrType:
+		if _, ok1 := et.Elem().(*reflect.StructType); !ok1 {
+			err = os.ErrorString(errInvalidChan)
+			return
+		}
+	default:
+		err = os.ErrorString(errInvalidChan)
+		return
+	}
+	return
+}
+
 func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
-	if !ok {
-		err = os.ErrorString(errNotChan)
-		s.LogError(err)
-		s.Raise(err)
+	ch, err1 := s.validateChan(v)
+	if err1 != nil {
+		s.LogError(err1)
+		s.Raise(err1)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
-	var bindChan chan BindEvent
+	var bindChan chan *BindEvent
+	var ok bool
 	if av.NumField() > 0 {
 		switch cv := av.Field(0).(type) {
 		case *reflect.ChanValue:
 			icv := cv.Interface()
-			bindChan, ok = icv.(chan BindEvent)
+			bindChan, ok = icv.(chan *BindEvent)
 			if !ok {
-				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
+				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
 				s.LogError(err)
 				s.Raise(err)
 				return
@@ -277,24 +303,23 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(err)
 		return
 	}
-	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
-	if !ok {
-		err = os.ErrorString(errNotChan)
-		s.LogError(err)
-		s.Raise(err)
+	ch, err1 := s.validateChan(v)
+	if err1 != nil {
+		s.LogError(err1)
+		s.Raise(err1)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
-	var bindChan chan BindEvent
-	var flag bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
+	var bindChan chan *BindEvent
+	var ok, flag bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 	if av.NumField() > 0 {
 		for i := 0; i < av.NumField(); i++ {
 			switch cv := av.Field(i).(type) {
 			case *reflect.ChanValue:
 				icv := cv.Interface()
-				bindChan, ok = icv.(chan BindEvent)
+				bindChan, ok = icv.(chan *BindEvent)
 				if !ok {
-					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan BindEvent")
+					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
 					s.LogError(err)
 					s.Raise(err)
 					return
@@ -340,7 +365,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
 						//only close it when flag is set
-						for !(endp.bindChan <- BindEvent{EndOfData, 0}) {
+						for !(endp.bindChan <- &BindEvent{EndOfData, 0}) {
 							<-endp.bindChan
 						}
 						if flag {
@@ -370,11 +395,10 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	cv, ok := reflect.NewValue(v).(*reflect.ChanValue)
-	if !ok {
-		err = os.ErrorString(errNotChan)
-		s.LogError(err)
-		s.Raise(err)
+	cv, err1 := s.validateChan(v)
+	if err1 != nil {
+		s.LogError(err1)
+		s.Raise(err1)
 		return
 	}
 	endp := &endpoint{}

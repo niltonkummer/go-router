@@ -45,7 +45,11 @@ type Servant struct {
 
 func NewServant(n string, role ServantRole, done chan bool) *Servant {
 	s := new(Servant)
-	s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy)
+	if role == Standby {
+		s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy /*, n, router.ScopeLocal*/ )
+	} else {
+		s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy)
+	}
 	s.role = role
 	s.name = n
 	//start system tasks, ServiceTask will be created when clients connect
@@ -74,7 +78,7 @@ func (s *Servant) Run(done chan bool) {
 		}
 		fmt.Println(s.name, "connect one client")
 
-		_, err = s.Rot.ConnectRemote(conn, router.JsonMarshaling)
+		_, err = s.Rot.ConnectRemote(conn, router.GobMarshaling)
 		if err != nil {
 			fmt.Println(err)
 			continue

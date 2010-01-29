@@ -98,7 +98,7 @@ func (dt *DbTask) init(r router.Router, sn string, role ServantRole) {
 	//input_intf or recv chans
 	r.AttachRecvChan(router.StrID("/Sys/Command"), dt.sysCmdChan)
 	//use a bindChan to keep dbReqChan open when all clients detach & exit
-	bc := make(chan router.BindEvent, 1)
+	bc := make(chan *router.BindEvent, 1)
 	r.AttachRecvChan(router.StrID("/DB/Request"), dt.dbReqChan, bc)
 }
 

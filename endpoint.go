@@ -20,7 +20,7 @@ const (
 type endpoint struct {
 	kind       endpointType
 	Id         Id
-	bindChan   chan BindEvent
+	bindChan   chan *BindEvent
 	extIntf    *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
 	Chan       chan interface{}   //sendChan for sender, recvChan for recver, internal to router
 	bindings   []*endpoint        //binding_set
@@ -153,7 +153,7 @@ func (e *endpoint) attachImpl(p *endpoint, done chan *command) {
 	e.bindings[len0] = p
 	if e.bindChan != nil {
 		//KeepLatest non-blocking send
-		for !(e.bindChan <- BindEvent{PeerAttach, len0 + 1}) { //chan full
+		for !(e.bindChan <- &BindEvent{PeerAttach, len0 + 1}) { //chan full
 			<-e.bindChan //drop the oldest one
 		}
 	}
@@ -177,7 +177,7 @@ func (e *endpoint) detachImpl(p *endpoint) {
 			e.bindings = e.bindings[0 : n-1]
 			if e.bindChan != nil {
 				//KeepLatest non-blocking send
-				for !(e.bindChan <- BindEvent{PeerDetach, n - 1}) { //chan full
+				for !(e.bindChan <- &BindEvent{PeerDetach, n - 1}) { //chan full
 					<-e.bindChan //drop the oldest one
 				}
 			}

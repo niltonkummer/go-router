@@ -167,9 +167,9 @@ func test_notification() {
 	rout := router.New(router.StrID(), 32, router.BroadcastPolicy)
 	chi1 := make(chan string)
 	chi2 := make(chan string)
-	chiN := make(chan router.IdChanInfoMsg)
+	chiN := make(chan *router.IdChanInfoMsg)
 	cho := make(chan string)
-	bound := make(chan router.BindEvent, 1)
+	bound := make(chan *router.BindEvent, 1)
 	done := make(chan bool)
 	//subscribe to recver attach events
 	rout.AttachRecvChan(rout.SysID(router.SubId), chiN)
@@ -229,10 +229,10 @@ func test_local_conn() {
 	chi1 := make(chan string)
 	chi2 := make(chan string)
 	chi3 := make(chan string)
-	chiN := make(chan router.IdChanInfoMsg)
+	chiN := make(chan *router.IdChanInfoMsg)
 	cho := make(chan string)
 	done := make(chan bool)
-	bound := make(chan router.BindEvent, 1)
+	bound := make(chan *router.BindEvent, 1)
 	//subscribe to recver attach events
 	rout1.AttachRecvChan(rout1.SysID(router.SubId), chiN)
 	//when attaching sending chan, add a (chan BindEvent) for notifying recver connecting
@@ -305,10 +305,10 @@ func test_logger() {
 	chi1 := make(chan string)
 	chi2 := make(chan string)
 	chi3 := make(chan string)
-	chiN := make(chan router.IdChanInfoMsg)
+	chiN := make(chan *router.IdChanInfoMsg)
 	cho := make(chan string)
 	done := make(chan bool)
-	bound := make(chan router.BindEvent, 1)
+	bound := make(chan *router.BindEvent, 1)
 	//subscribe to recver attach events
 	rout1.AttachRecvChan(rout1.SysID(router.SubId), chiN)
 	//when attaching sending chan, add a (chan BindEvent) for notifying recver connecting
@@ -395,7 +395,7 @@ func test_remote_conn() {
 		} else {
 			cho := make(chan string)
 			chi1 := make(chan string)
-			bound := make(chan router.BindEvent, 1)
+			bound := make(chan *router.BindEvent, 1)
 			done := make(chan bool)
 			rout1.AttachSendChan(router.IntID(10), cho, bound)
 			rout1.AttachRecvChan(router.IntID(10), chi1)

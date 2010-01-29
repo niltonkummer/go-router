@@ -93,7 +93,7 @@ func (ft *FaultMgrTask) init(r router.Router, sn string, role ServantRole) {
 	ft.rot.AttachSendChan(router.StrID("/Sys/OutOfService"), ft.sysOOSChan)
 	ft.rot.AttachRecvChan(router.StrID("/Sys/Command"), ft.sysCmdChan)
 	//use a bindChan to keep faultReportChan open when all clients exit
-	bc := make(chan router.BindEvent, 1)
+	bc := make(chan *router.BindEvent, 1)
 	ft.rot.AttachRecvChan(router.StrID("/Fault/DB/Exception"), ft.faultReportChan, bc)
 	ft.rot.AttachRecvChan(router.StrID("/Fault/AppService/Exception"), ft.faultReportChan, bc)
 }

@@ -46,7 +46,7 @@ type ServiceTask struct {
 	numTrans    int //how many requests have been handled
 	role        ServantRole
 	random      *rand.Rand //for generating fake db requests and fake fault report
-	bindChan    chan router.BindEvent
+	bindChan    chan *router.BindEvent
 }
 
 func NewServiceTask(r router.Router, sn string, n string, role ServantRole) *ServiceTask {
@@ -113,7 +113,7 @@ func (at *ServiceTask) init(r router.Router, sn string, n string, role ServantRo
 	at.sysCmdChan = make(chan string)
 	at.svcCmdChan = make(chan string)
 	at.dbRespChan = make(chan string)
-	at.bindChan = make(chan router.BindEvent, 1)
+	at.bindChan = make(chan *router.BindEvent, 1)
 	svcname := "/App/" + at.name
 	//output_intf or send chans
 	at.FaultRaiser = router.NewFaultRaiser(router.StrID("/Fault/AppService/Exception"), at.rot, at.name)

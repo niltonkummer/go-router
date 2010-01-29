@@ -2,34 +2,34 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"strconv"
 	"flag"
 	"router"
 )
 
+//Msg instances are bounced between Pinger and Ponger as balls
+type Msg struct {
+	Data string
+	Count int
+}
+
 //pinger: send to ping chan, recv from pong chan
 type Pinger struct {
 	//Pinger's public interface
-	pingChan chan<- string
-	pongChan <-chan string
+	pingChan chan<- *Msg
+	pongChan <-chan *Msg
 	done     chan<- bool
 	//Pinger's private state
 	numRuns int //how many times should we ping-pong
-	count   int
 }
 
 func (p *Pinger) Run() {
-	p.count = 0
 	for v := range p.pongChan {
 		fmt.Println("Pinger recv: ", v)
-		ind := strings.Index(v, ":")
-		p.count, _ = strconv.Atoi(v[ind+1:])
-		if p.count > p.numRuns {
+		if v.Count > p.numRuns {
 			break
 		}
-		p.count++
-		p.pingChan <- fmt.Sprintf("hello from Pinger :%d", p.count)
+		p.pingChan <- &Msg{"hello from Pinger", v.Count+1}
 	}
 	close(p.pingChan)
 	p.done <- true
@@ -37,34 +37,29 @@ func (p *Pinger) Run() {
 
 func newPinger(rot router.Router, done chan<- bool, numRuns int) {
 	//attach chans to router
-	pingChan := make(chan string)
-	pongChan := make(chan string)
+	pingChan := make(chan *Msg)
+	pongChan := make(chan *Msg)
 	rot.AttachSendChan(router.StrID("ping"), pingChan)
 	rot.AttachRecvChan(router.StrID("pong"), pongChan)
 	//start pinger
-	ping := &Pinger{pingChan, pongChan, done, numRuns, 0}
+	ping := &Pinger{pingChan, pongChan, done, numRuns}
 	go ping.Run()
 }
 
 //ponger: send to pong chan, recv from ping chan
 type Ponger struct {
 	//Ponger's public interface
-	pongChan chan<- string
-	pingChan <-chan string
+	pongChan chan<- *Msg
+	pingChan <-chan *Msg
 	done     chan<- bool
 	//Ponger's private state
-	count int
 }
 
 func (p *Ponger) Run() {
-	p.count = 0
-	p.pongChan <- fmt.Sprintf("hello from Ponger :%d", p.count)
+	p.pongChan <- &Msg{"hello from Ponger", 0}  //initiate ping-pong
 	for v := range p.pingChan {
 		fmt.Println("Ponger recv: ", v)
-		ind := strings.Index(v, ":")
-		p.count, _ = strconv.Atoi(v[ind+1:])
-		p.count++
-		p.pongChan <- fmt.Sprintf("hello from Ponger :%d", p.count)
+		p.pongChan <- &Msg{"hello from Ponger", v.Count+1}
 	}
 	close(p.pongChan)
 	p.done <- true
@@ -72,9 +67,9 @@ func (p *Ponger) Run() {
 
 func newPonger(rot router.Router, done chan<- bool) {
 	//attach chans to router
-	pingChan := make(chan string)
-	pongChan := make(chan string)
-	bindChan := make(chan router.BindEvent, 1)
+	pingChan := make(chan *Msg)
+	pongChan := make(chan *Msg)
+	bindChan := make(chan *router.BindEvent, 1)
 	rot.AttachSendChan(router.StrID("pong"), pongChan, bindChan)
 	rot.AttachRecvChan(router.StrID("ping"), pingChan)
 	//wait for pinger connecting
@@ -84,7 +79,7 @@ func newPonger(rot router.Router, done chan<- bool) {
 		}
 	}
 	//start ponger
-	pong := &Ponger{pongChan, pingChan, done, 0}
+	pong := &Ponger{pongChan, pingChan, done}
 	go pong.Run()
 }
 

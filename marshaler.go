@@ -88,7 +88,7 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 	*/
 	case *reflect.StructValue:
 		switch e1 := e.(type) {
-		case ConnInfoMsg:
+		case *ConnInfoMsg:
 			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.SeedId != nil}); err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
 				}
 			}
 			return nil
-		case IdChanInfoMsg:
+		case *IdChanInfoMsg:
 			num := len(e1.Info)
 			w := &intWrapper{num}
 			if err := ((*gob.Encoder)(gm)).Encode(w); err != nil {
@@ -392,7 +392,7 @@ func (jm *jsonMarshaler) Marshal(e interface{}) (err os.Error) {
 	*/
 	case *reflect.StructValue:
 		switch e1 := e.(type) {
-		case ConnInfoMsg:
+		case *ConnInfoMsg:
 			if err = jm.encodeBool(e1.SeedId != nil); err != nil {
 				return
 			}
@@ -418,7 +418,7 @@ func (jm *jsonMarshaler) Marshal(e interface{}) (err os.Error) {
 				}
 			}
 			return
-		case IdChanInfoMsg:
+		case *IdChanInfoMsg:
 			num := len(e1.Info)
 			if err = jm.encodeInt(num); err != nil {
 				return

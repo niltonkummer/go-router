@@ -33,9 +33,9 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	s.proxy = p
 	//create export chans
 	s.myCmdChan = make(chan peerCommand, DefCmdChanBufSize)
-	s.exportConnChan = make(chan genericMsg, p.router.defChanBufSize)
-	s.exportPubSubChan = make(chan genericMsg, p.router.defChanBufSize)
-	s.exportAppDataChan = make(chan genericMsg, p.router.defChanBufSize)
+	s.exportConnChan = make(chan *genericMsg, p.router.defChanBufSize)
+	s.exportPubSubChan = make(chan *genericMsg, p.router.defChanBufSize)
+	s.exportAppDataChan = make(chan *genericMsg, p.router.defChanBufSize)
 	//
 	s.rwc = rwc
 	s.mar = mp.NewMarshaler(rwc)
@@ -77,7 +77,7 @@ func (s *stream) closeImpl() {
 	}
 }
 
-func (s *stream) send(m genericMsg, appMsg bool) (err os.Error) {
+func (s *stream) send(m *genericMsg, appMsg bool) (err os.Error) {
 	if appMsg {
 		_, ok := m.Data.(chanCloseMsg)
 		id := m.Id
@@ -150,7 +150,7 @@ func (s *stream) outputMainLoop() {
 	if !proxyDisconn {
 		//must be io conn fail or marshal fail
 		//notify proxy disconn
-		s.exportConnChan <- genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
+		s.exportConnChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
 	}
 	s.closeImpl()
 	s.Log(LOG_INFO, "outputMainLoop exit")
@@ -167,7 +167,7 @@ func (s *stream) inputMainLoop() {
 	}
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
-	s.exportConnChan <- genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: ConnInfoMsg{}}
+	s.exportConnChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
 	//s.closeImpl() only called from outputMainLoop
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
@@ -189,13 +189,13 @@ func (s *stream) recv() (err os.Error) {
 		fallthrough
 	case id.Match(r.SysID(ConnReadyId)):
 		idc, _ := r.seedId.Clone()
-		cim := ConnInfoMsg{SeedId: idc}
-		if err = s.demar.Demarshal(&cim, nil); err != nil {
+		cim := &ConnInfoMsg{SeedId: idc}
+		if err = s.demar.Demarshal(cim, nil); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
 		}
-		s.exportConnChan <- genericMsg{id, cim}
+		s.exportConnChan <- &genericMsg{id, cim}
 	case id.Match(r.SysID(PubId)):
 		fallthrough
 	case id.Match(r.SysID(UnPubId)):
@@ -204,31 +204,37 @@ func (s *stream) recv() (err os.Error) {
 		fallthrough
 	case id.Match(r.SysID(UnSubId)):
 		idc, _ := r.seedId.Clone()
-		icm := IdChanInfoMsg{[]*IdChanInfo{&IdChanInfo{idc, nil, nil}}}
-		if err = s.demar.Demarshal(&icm, nil); err != nil {
+		icm := &IdChanInfoMsg{[]*IdChanInfo{&IdChanInfo{idc, nil, nil}}}
+		if err = s.demar.Demarshal(icm, nil); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
 		}
-		s.exportPubSubChan <- genericMsg{id, icm}
+		s.exportPubSubChan <- &genericMsg{id, icm}
 	default: //appMsg
 		if id.Scope() == NumScope && id.Member() == NumMembership { //chan is closed
-			s.exportAppDataChan <- genericMsg{id, chanCloseMsg{}}
+			s.exportAppDataChan <- &genericMsg{id, chanCloseMsg{}}
 		} else {
 			chanType := s.proxy.getExportRecvChanType(id)
 			if chanType == nil {
 				errStr := fmt.Sprintf("failed to find chanType for id %v", id)
 				s.Log(LOG_ERROR, errStr)
-				//s.Raise(os.ErrorString(errStr))
+				s.Raise(os.ErrorString(errStr))
 				return
 			}
 			val := reflect.MakeZero(chanType.Elem())
+			ptrT, ok := chanType.Elem().(*reflect.PtrType)
+			if ok {
+				sto := reflect.MakeZero(ptrT.Elem())
+				val = reflect.MakeZero(ptrT)
+				val.(*reflect.PtrValue).PointTo(sto)
+			}
 			if err = s.demar.Demarshal(val.Interface(), val); err != nil {
 				s.LogError(err)
 				//s.Raise(err)
 				return
 			}
-			s.exportAppDataChan <- genericMsg{id, val.Interface()}
+			s.exportAppDataChan <- &genericMsg{id, val.Interface()}
 		}
 	}
 	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))

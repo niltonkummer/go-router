@@ -76,7 +76,7 @@ server: package
 	@echo "Done. Executable is: $@"
 
 clean:
-	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main
+	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main test1 chatcli chatsrv pingpong1 pingpong2 pingpong3 client server
 
 package: _obj/$(TARG).a
 

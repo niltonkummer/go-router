@@ -17,7 +17,7 @@ import (
 //Some basic error msgs for log and fault
 var (
 	errIdTypeMismatch        = "id type mismatch"
-	errNotChan               = "values other than channels cannot be attached to router"
+	errInvalidChan           = "invalid channels be attached to router; valid channel types: chan bool/int/float/string/*struct"
 	errInvalidBindChan       = "invalid channels for notifying sender/recver attachment"
 	errChanTypeMismatch      = "channels of diff type attach to matched id"
 	errDetachChanNotInRouter = "try to detach a channel which is not attached to router"
@@ -64,7 +64,7 @@ type LogRecord struct {
 }
 
 type logger struct {
-	bindEvtChan chan BindEvent
+	bindEvtChan chan *BindEvent
 	source      string
 	logChan     chan *LogRecord
 	router      Router
@@ -77,7 +77,7 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 	logger.id = id
 	logger.router = r
 	logger.source = src
-	logger.bindEvtChan = make(chan BindEvent, 1) //just need the latest binding event
+	logger.bindEvtChan = make(chan *BindEvent, 1) //just need the latest binding event
 	logger.logChan = make(chan *LogRecord, bufSize)
 	err := logger.router.AttachSendChan(id, logger.logChan, logger.bindEvtChan)
 	if err != nil {
@@ -231,7 +231,7 @@ type FaultRecord struct {
 }
 
 type faultRaiser struct {
-	bindEvtChan chan BindEvent
+	bindEvtChan chan *BindEvent
 	source      string
 	faultChan   chan *FaultRecord
 	router      *routerImpl
@@ -244,7 +244,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 	faultRaiser.id = id
 	faultRaiser.router = r.(*routerImpl)
 	faultRaiser.source = src
-	faultRaiser.bindEvtChan = make(chan BindEvent, 1) //just need the latest binding event
+	faultRaiser.bindEvtChan = make(chan *BindEvent, 1) //just need the latest binding event
 	faultRaiser.faultChan = make(chan *FaultRecord, bufSize)
 	err := faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan, faultRaiser.bindEvtChan)
 	if err != nil {

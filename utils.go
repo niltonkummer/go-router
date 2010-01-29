@@ -18,7 +18,7 @@ type recverInBundle struct {
 	bundle      *recvChanBundle
 	id          Id
 	ch          *reflect.ChanValue
-	bindChan    chan BindEvent
+	bindChan    chan *BindEvent
 	numBindings int
 }
 
@@ -30,10 +30,10 @@ func (r *recverInBundle) mainLoop() {
 		v := r.ch.Recv()
 		if r.ch.Closed() {
 			r.bundle.router.Log(LOG_INFO, fmt.Sprintf("close proxy chan for %v", r.id))
-			r.bundle.OutChan <- genericMsg{Id: r.id, Data: chanCloseMsg{}}
+			r.bundle.OutChan <- &genericMsg{Id: r.id, Data: chanCloseMsg{}}
 			break
 		}
-		r.bundle.OutChan <- genericMsg{Id: r.id, Data: v.Interface()}
+		r.bundle.OutChan <- &genericMsg{Id: r.id, Data: v.Interface()}
 		//r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward one msg for id %v: %v", r.id, v.Interface()))
 	}
 	r.bundle.router.Log(LOG_INFO, fmt.Sprintf("proxy forward chan goroutine for %v exit", r.id))
@@ -44,12 +44,12 @@ type recvChanBundle struct {
 	scope      int
 	member     int
 	recvChans  map[interface{}]*recverInBundle
-	OutChan    chan genericMsg
+	OutChan    chan *genericMsg
 	ownOutChan bool
 	started    bool
 }
 
-func newRecvChanBundle(r Router, s int, m int, mc chan genericMsg) *recvChanBundle {
+func newRecvChanBundle(r Router, s int, m int, mc chan *genericMsg) *recvChanBundle {
 	rcb := new(recvChanBundle)
 	rcb.router = r.(*routerImpl)
 	rcb.scope = s
@@ -59,7 +59,7 @@ func newRecvChanBundle(r Router, s int, m int, mc chan genericMsg) *recvChanBund
 		rcb.OutChan = mc
 		rcb.ownOutChan = false
 	} else {
-		rcb.OutChan = make(chan genericMsg, rcb.router.defChanBufSize)
+		rcb.OutChan = make(chan *genericMsg, rcb.router.defChanBufSize)
 		rcb.ownOutChan = true
 	}
 	return rcb
@@ -111,7 +111,7 @@ func (rcb *recvChanBundle) AddRecver(id Id, chanType *reflect.ChanType) os.Error
 	r.id, _ = id.Clone(rcb.scope, rcb.member)
 	rt := rcb.router
 	r.ch = reflect.MakeChan(chanType, rt.defChanBufSize)
-	r.bindChan = make(chan BindEvent, 1)
+	r.bindChan = make(chan *BindEvent, 1)
 	err := rt.AttachRecvChan(r.id, r.ch.Interface(), r.bindChan, true)
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (rcb *recvChanBundle) Close() {
 type senderInBundle struct {
 	id          Id
 	ch          *reflect.ChanValue
-	bindChan    chan BindEvent
+	bindChan    chan *BindEvent
 	numBindings int
 }
 
@@ -236,7 +236,7 @@ func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) os.Error
 	s.id, _ = id.Clone(scb.scope, scb.member)
 	rt := scb.router
 	s.ch = reflect.MakeChan(chanType, rt.defChanBufSize)
-	s.bindChan = make(chan BindEvent, 1)
+	s.bindChan = make(chan *BindEvent, 1)
 	err := rt.AttachSendChan(s.id, s.ch.Interface(), s.bindChan)
 	if err != nil {
 		return err

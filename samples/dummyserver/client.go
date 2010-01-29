@@ -35,12 +35,12 @@ func main() {
 
 	//create router and connect it to both active and standby servants
 	rot := router.New(router.StrID(), 32, router.BroadcastPolicy)
-	rot.ConnectRemote(conn1, router.JsonMarshaling)
-	rot.ConnectRemote(conn2, router.JsonMarshaling)
+	rot.ConnectRemote(conn1, router.GobMarshaling)
+	rot.ConnectRemote(conn2, router.GobMarshaling)
 
 	reqChan := make(chan string)
 	rspChan := make(chan string)
-	bindChan := make(chan router.BindEvent, 1)
+	bindChan := make(chan *router.BindEvent, 1)
 	rot.AttachSendChan(router.StrID("/App/"+svcName+"/Request"), reqChan, bindChan)
 	rot.AttachRecvChan(router.StrID("/App/"+svcName+"/Response"), rspChan)
 	//make sure client connect to 2 servants before sending requests

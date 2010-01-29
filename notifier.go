@@ -11,7 +11,7 @@ import (
 )
 
 type notifyChansPerScope struct {
-	chans [4]chan IdChanInfoMsg
+	chans [4]chan *IdChanInfoMsg
 	flags [4]bool
 }
 
@@ -27,7 +27,7 @@ func (n *notifyChansPerScope) Close(scope int, member int, r *routerImpl) {
 func newNotifyChansPerScope(scope int, member int, r *routerImpl) *notifyChansPerScope {
 	nc := new(notifyChansPerScope)
 	for i := 0; i < 4; i++ {
-		nc.chans[i] = make(chan IdChanInfoMsg, r.defChanBufSize)
+		nc.chans[i] = make(chan *IdChanInfoMsg, r.defChanBufSize)
 		r.AttachSendChan(r.NewSysID(PubId+i, scope, member), nc.chans[i])
 	}
 	return nc
@@ -64,9 +64,9 @@ func (n *notifier) setFlag(id Id, sysIdx int, flag bool) {
 func (n notifier) notifyPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyPub: %v", info.Id))
 	if n.notifyChans[info.Id.Scope()].flags[0] {
-		ok := n.notifyChans[info.Id.Scope()].chans[0] <- IdChanInfoMsg{Info: []*IdChanInfo{info}}
+		ok := n.notifyChans[info.Id.Scope()].chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[0] <- IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { n.notifyChans[info.Id.Scope()].chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
@@ -74,9 +74,9 @@ func (n notifier) notifyPub(info *IdChanInfo) {
 func (n notifier) notifyUnPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyUnPub: %v", info.Id))
 	if n.notifyChans[info.Id.Scope()].flags[1] {
-		ok := n.notifyChans[info.Id.Scope()].chans[1] <- IdChanInfoMsg{Info: []*IdChanInfo{info}}
+		ok := n.notifyChans[info.Id.Scope()].chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[1] <- IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { n.notifyChans[info.Id.Scope()].chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
@@ -84,9 +84,9 @@ func (n notifier) notifyUnPub(info *IdChanInfo) {
 func (n notifier) notifySub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
 	if n.notifyChans[info.Id.Scope()].flags[2] {
-		ok := n.notifyChans[info.Id.Scope()].chans[2] <- IdChanInfoMsg{Info: []*IdChanInfo{info}}
+		ok := n.notifyChans[info.Id.Scope()].chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[2] <- IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { n.notifyChans[info.Id.Scope()].chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
@@ -94,9 +94,9 @@ func (n notifier) notifySub(info *IdChanInfo) {
 func (n notifier) notifyUnSub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
 	if n.notifyChans[info.Id.Scope()].flags[3] {
-		ok := n.notifyChans[info.Id.Scope()].chans[3] <- IdChanInfoMsg{Info: []*IdChanInfo{info}}
+		ok := n.notifyChans[info.Id.Scope()].chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[3] <- IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { n.notifyChans[info.Id.Scope()].chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
