@@ -92,6 +92,7 @@ const (
 	addProxy
 	delProxy
 	shutdown
+	GC         //kludge for issue #536
 )
 
 type command struct {
