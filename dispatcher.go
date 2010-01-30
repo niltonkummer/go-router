@@ -53,6 +53,20 @@ func Broadcast(v interface{}, recvers []*endpoint) {
 //BroadcastPolicy is used to generate broadcast dispatcher instances
 var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })
 
+//KeepLastBroadcast never block. if running out of Chan buffer, drop old items and keep the latest items
+func KeepLatestBroadcast(v interface{}, recvers []*endpoint) {
+	for _, rc := range recvers {
+		if !closed(rc.Chan) {
+			for !(rc.Chan <- v) {
+				<- rc.Chan
+			}
+		}
+	}
+}
+
+//KeepLatestBroadcastPolicy generates KeepLatestBroadcast dispatcher
+var KeepLatestBroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(KeepLatestBroadcast) })
+
 //Roundrobin dispatcher will keep the "next" index as its state
 type Roundrobin struct {
 	next int
