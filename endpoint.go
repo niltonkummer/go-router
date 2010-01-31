@@ -123,9 +123,10 @@ func (e *endpoint) senderLoop() {
 						e.dispatcher.Dispatch(v, e.bindings)
 						//kludge for issue#536
 						count++
-						if count > 64 {
+						if count > DefCountBeforeGC {
 							count = 0
-							e.cmdChan <- &command{kind:GC}
+							//make this nonblocking since it is fine as long as something inside cmdChan
+							_ = e.cmdChan <- &command{kind:GC}
 						}
 					} else {
 						e.detachAllRecvChans()

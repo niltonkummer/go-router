@@ -155,9 +155,10 @@ func (s *stream) outputMainLoop() {
 				}
 				//kludge for issue#536
 				count++
-				if count > 64 {
+				if count > DefCountBeforeGC {
 					count = 0
-					s.myCmdChan <- peerGC
+					//make this nonblocking since it is fine as long as something inside cmdChan
+					_ = s.myCmdChan <- peerGC
 				}
 			}
 		}
