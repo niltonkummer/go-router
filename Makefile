@@ -26,7 +26,7 @@ GOTESTFILES=
 
 
 # build executables
-all: test1 chatcli chatsrv pingpong1 pingpong2 pingpong3 client server
+all: test1 chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 client server
 test1: package
 	$(GC) -I_obj test1.go
 	$(LD) -L_obj -o $@ test1.$O
@@ -55,6 +55,11 @@ pingpong2: package
 pingpong3: package
 	$(GC) -I_obj samples/pingpong3.go
 	$(LD) -L_obj -o $@ pingpong3.$O
+	@echo "Done. Executable is: $@"
+
+pingpong4: package
+	$(GC) -I_obj samples/pingpong4.go
+	$(LD) -L_obj -o $@ pingpong4.$O
 	@echo "Done. Executable is: $@"
 
 client: package

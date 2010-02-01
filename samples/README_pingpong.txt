@@ -29,9 +29,14 @@ and newPonger(), inside which new pingChan/pongChan are created, attached
 to proper ids "ping" or "pong" in router, so the connection between Pinger
 and Ponger is set up thru router.
 
-In 3rd game (pingpong3), we set the players further apart. Instead of 
-connecting Pinger/Ponger thru the same router, we create a unix sock connection,
-create a router at both ends of it, and attach pingChan/pongChan to one of
+In 3rd game (pingpong3), we set the players two steps apart. Instead of 
+connecting Pinger/Ponger thru the same router, we create two routers, one for Pinger
+and the other for Ponger. These two routers are connected directly and Pinger and
+Ponger are attached to one of them.
+
+In 4th game (pingpong4), we set the players further apart. Instead of 
+two routers directly connected, we create a unix sock connection,
+create and connect a router at both ends of it, and attach pingChan/pongChan to one of
 the routers.
 
 In the above three configurations, Pinger and Ponger's interface and code remain
