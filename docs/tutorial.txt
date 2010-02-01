@@ -167,4 +167,5 @@ func router.New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router
       . when routers are disconnected, routers' namespaces will be updated automatically so that 
         all publications and subscriptions from remote routers will be removed.
 
-
+8. Reference
+   http://channel.sourceforge.net
