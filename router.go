@@ -109,8 +109,8 @@ type command struct {
 type tblEntry struct {
 	chanType *reflect.ChanType
 	id       Id
-	senders  map[interface{}]*endpoint
-	recvers  map[interface{}]*endpoint
+	senders  map[interface{}]*Endpoint
+	recvers  map[interface{}]*Endpoint
 }
 
 type routerImpl struct {
@@ -403,7 +403,7 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err1)
 		return
 	}
-	endp := &endpoint{}
+	endp := &Endpoint{}
 	endp.Id = id
 	endp.extIntf = cv
 	cmd := &command{}
@@ -462,7 +462,7 @@ func (s *routerImpl) mainLoop() {
 }
 
 func (s *routerImpl) attach(cmd *command) {
-	endp := cmd.data.(*endpoint)
+	endp := cmd.data.(*Endpoint)
 
 	//handle id
 	if reflect.Typeof(endp.Id) != s.idType {
@@ -480,8 +480,8 @@ func (s *routerImpl) attach(cmd *command) {
 		s.routingTable[endp.Id.Key()] = ent
 		ent.id = endp.Id // will only use the Val/Match() part of id
 		ent.chanType = endp.extIntf.Type().(*reflect.ChanType)
-		ent.senders = make(map[interface{}]*endpoint)
-		ent.recvers = make(map[interface{}]*endpoint)
+		ent.senders = make(map[interface{}]*Endpoint)
+		ent.recvers = make(map[interface{}]*Endpoint)
 	} else {
 		if endp.extIntf.Type().(*reflect.ChanType) != ent.chanType {
 			cmd.error = os.ErrorString(fmt.Sprintf("%s %v", errChanTypeMismatch, endp.Id))
@@ -588,7 +588,7 @@ func (s *routerImpl) attach(cmd *command) {
 		count := 0 //count how many outstanding
 
 		for i := 0; i < matches.Len(); i++ {
-			peer := matches.At(i).(*endpoint)
+			peer := matches.At(i).(*Endpoint)
 			endp.attach(peer, done)
 			peer.attach(endp, done)
 			count += 2
@@ -618,7 +618,7 @@ func (s *routerImpl) attach(cmd *command) {
 }
 
 func (s *routerImpl) detach(cmd *command) {
-	endp := cmd.data.(*endpoint)
+	endp := cmd.data.(*Endpoint)
 	s.Log(LOG_INFO, fmt.Sprintf("detach chan from id %v\n", endp.Id))
 
 	//check id

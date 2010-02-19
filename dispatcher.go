@@ -20,13 +20,13 @@ type DispatchPolicy interface {
 
 //Dispatcher is the common interface of all dispatchers
 type Dispatcher interface {
-	Dispatch(v interface{}, recvers []*endpoint)
+	Dispatch(v interface{}, recvers []*Endpoint)
 }
 
 //DispatchFunc is a wrapper to convert a plain function into a dispatcher
-type DispatchFunc func(v interface{}, recvers []*endpoint)
+type DispatchFunc func(v interface{}, recvers []*Endpoint)
 
-func (f DispatchFunc) Dispatch(v interface{}, recvers []*endpoint) {
+func (f DispatchFunc) Dispatch(v interface{}, recvers []*Endpoint) {
 	f(v, recvers)
 }
 
@@ -42,7 +42,7 @@ func (f PolicyFunc) NewDispatcher() Dispatcher {
 */
 
 //Simple broadcast is a plain function
-func Broadcast(v interface{}, recvers []*endpoint) {
+func Broadcast(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			rc.Chan <- v
@@ -54,7 +54,7 @@ func Broadcast(v interface{}, recvers []*endpoint) {
 var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })
 
 //KeepLastBroadcast never block. if running out of Chan buffer, drop old items and keep the latest items
-func KeepLatestBroadcast(v interface{}, recvers []*endpoint) {
+func KeepLatestBroadcast(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			for !(rc.Chan <- v) {
@@ -74,7 +74,7 @@ type Roundrobin struct {
 
 func NewRoundrobin() *Roundrobin { return &Roundrobin{0} }
 
-func (r *Roundrobin) Dispatch(v interface{}, recvers []*endpoint) {
+func (r *Roundrobin) Dispatch(v interface{}, recvers []*Endpoint) {
 	start := r.next
 	for {
 		rc := recvers[r.next]
@@ -99,7 +99,7 @@ func NewRandomDispatcher() *RandomDispatcher {
 	return (*RandomDispatcher)(rand.New(rand.NewSource(time.Seconds())))
 }
 
-func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*endpoint) {
+func (rd *RandomDispatcher) Dispatch(v interface{}, recvers []*Endpoint) {
 	for {
 		ind := ((*rand.Rand)(rd)).Intn(len(recvers))
 		rc := recvers[ind]
@@ -129,7 +129,7 @@ func NewTimeoutDropBroadcaster(to int64) *TimeoutDropBroadcaster {
 	return &TimeoutDropBroadcaster{to}
 }
 
-func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
+func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -173,7 +173,7 @@ func (r *TimeoutReportBroadcaster) SendAndKeepLatest(to *TimeoutEvent) {
 	}
 }
 
-func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
+func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -219,7 +219,7 @@ func NewKeepLatestBroadcaster(to int64) *KeepLatestBroadcaster {
 	return &KeepLatestBroadcaster{to}
 }
 
-func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*endpoint) {
+func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
