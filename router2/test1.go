@@ -164,7 +164,7 @@ func test_MsgId() {
 }
 
 func test_notification() {
-	rout := router.New(router.StrID(), 32, router.BroadcastPolicy)
+	rout := router.New(router.StrID(), 32, router.BroadcastPolicy /*, "rot", router.ScopeLocal*/ )
 	chi1 := make(chan string)
 	chi2 := make(chan string)
 	chiN := make(chan *router.IdChanInfoMsg)
@@ -199,7 +199,7 @@ func test_notification() {
 	go func() {
 		for v := range chi2 {
 			fmt.Println("notif/sink2 got: ", v)
-			rout.DetachChan(router.StrID("test"), chi2)
+			go rout.DetachChan(router.StrID("test"), chi2)
 		}
 		done <- true
 	}()
@@ -228,7 +228,7 @@ func test_local_conn() {
 	rout1.Connect(rout2)
 	chi1 := make(chan string)
 	chi2 := make(chan string)
-	chi3 := make(chan string)
+	chi3 := make(chan string, 8)
 	chiN := make(chan *router.IdChanInfoMsg)
 	cho := make(chan string)
 	done := make(chan bool)
@@ -443,7 +443,7 @@ func test_remote_conn() {
 			fmt.Println(err)
 		} else {
 			chi2 := make(chan string)
-			chi3 := make(chan string)
+			chi3 := make(chan string, 8)
 			done := make(chan bool)
 			rout2.AttachRecvChan(router.IntID(10), chi2)
 			rout2.AttachRecvChan(router.IntID(10), chi3)

@@ -11,15 +11,21 @@ import (
 	"io"
 	"os"
 	"fmt"
+	"sync"
 )
 
 type stream struct {
-	peerBase
-	myCmdChan chan peerCommand
+	//imported chan to recv ctrl msgs from peer
+	importCtrlChan chan *genericMsg
+	//exported chan to send ctrl msgs to peer
+	exportCtrlChan chan *genericMsg
+	//use peerIntf.sendAppData() to forward app msgs to peer(proxy)
+	peer peerIntf
 	//
-	rwc   io.ReadWriteCloser
-	mar   Marshaler
-	demar Demarshaler
+	rwc        io.ReadWriteCloser
+	mar        Marshaler
+	demar      Demarshaler
+	sync.Mutex //lock for sharing sending socket-end between ctrl msgs and app msgs
 	//
 	proxy *proxyImpl
 	//others
@@ -32,10 +38,7 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	s := new(stream)
 	s.proxy = p
 	//create export chans
-	s.myCmdChan = make(chan peerCommand, DefCmdChanBufSize)
-	s.exportConnChan = make(chan *genericMsg, p.router.defChanBufSize)
-	s.exportPubSubChan = make(chan *genericMsg, p.router.defChanBufSize)
-	s.exportAppDataChan = make(chan *genericMsg, p.router.defChanBufSize)
+	s.exportCtrlChan = make(chan *genericMsg, DefCmdChanBufSize)
 	//
 	s.rwc = rwc
 	s.mar = mp.NewMarshaler(rwc)
@@ -55,14 +58,14 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	return s
 }
 
-func (s *stream) Start() {
+func (s *stream) start() {
 	go s.outputMainLoop()
 	go s.inputMainLoop()
 }
 
 func (s *stream) Close() {
 	s.Log(LOG_INFO, "Close() is called")
-	s.myCmdChan <- peerClose
+	close(s.importCtrlChan)
 }
 
 func (s *stream) closeImpl() {
@@ -77,102 +80,73 @@ func (s *stream) closeImpl() {
 	}
 }
 
-func (s *stream) send(m *genericMsg, appMsg bool) (err os.Error) {
-	if appMsg {
-		_, ok := m.Data.(chanCloseMsg)
-		id := m.Id
-		if ok {
-			id, _ = m.Id.Clone(NumScope, NumMembership) //special id to mark chan close
-		}
-		if err = s.mar.Marshal(id); err != nil {
-			s.LogError(err)
-			//s.Raise(err)
-			return
-		}
-		if !ok {
-			if err := s.mar.Marshal(m.Data); err != nil {
-				s.LogError(err)
-				//s.Raise(err)
-				return
-			}
-		}
-	} else {
-		if err = s.mar.Marshal(m.Id); err != nil {
-			s.LogError(err)
-			//s.Raise(err)
-			return
-		}
-		if err := s.mar.Marshal(m.Data); err != nil {
-			s.LogError(err)
-			//s.Raise(err)
-			return
-		}
+func (s *stream) sendCtrlData(m *genericMsg) (err os.Error) {
+	s.Lock()
+	defer s.Unlock()
+	if err = s.mar.Marshal(m.Id); err != nil {
+		s.LogError(err)
+		//s.Raise(err)
+		return
+	}
+	if err := s.mar.Marshal(m.Data); err != nil {
+		s.LogError(err)
+		//s.Raise(err)
+		return
 	}
 	s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", m.Id))
 	return
 }
 
-//read data from importConnChan/importPubSubChan/importAppDataChan and send them to io.Writer
+func (s *stream) sendAppData(id Id, data interface{}) (err os.Error) {
+	_, ok := data.(chanCloseMsg)
+	if ok {
+		id, _ = id.Clone(NumScope, NumMembership) //special id to mark chan close
+	}
+	s.Lock()
+	defer s.Unlock()
+	if err = s.mar.Marshal(id); err != nil {
+		s.LogError(err)
+		//s.Raise(err)
+		return
+	}
+	if !ok {
+		if err = s.mar.Marshal(data); err != nil {
+			s.LogError(err)
+			//s.Raise(err)
+			return
+		}
+	}
+	return
+}
+
+//read data from importCtrlChan/importAppDataChan and send them to io.Writer
 func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop start")
-	//kludge for issue#536, merge data streams into one chan
-	go func() {
-		for {
-			m := <- s.importConnChan
-			if closed(s.importConnChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
-	go func() {
-		for {
-			m := <- s.importPubSubChan
-			if closed(s.importPubSubChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
 	//
 	proxyDisconn := false
 	cont := true
-	count := 0
 	for cont {
-		select {
-		case cmd := <-s.myCmdChan:
-			if cmd == peerClose {
+		m := <-s.importCtrlChan
+		if !closed(s.importCtrlChan) {
+			if err := s.sendCtrlData(m); err != nil {
 				cont = false
 			}
-		case m := <-s.importAppDataChan:
-			if !closed(s.importAppDataChan) {
-				if err := s.send(m, true); err != nil {
-					cont = false
-				}
-				if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) {
-					proxyDisconn = true
-					cont = false
-				}
-				//kludge for issue#536
-				count++
-				if count > DefCountBeforeGC {
-					count = 0
-					//make this nonblocking since it is fine as long as something inside cmdChan
-					_ = s.myCmdChan <- peerGC
-				}
+			if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) {
+				proxyDisconn = true
+				cont = false
 			}
 		}
 	}
 	if !proxyDisconn {
 		//must be io conn fail or marshal fail
 		//notify proxy disconn
-		s.exportConnChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
+		s.exportCtrlChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
 	}
 	s.closeImpl()
 	s.Log(LOG_INFO, "outputMainLoop exit")
 }
 
-//read data from io.Reader and pass them to exportConnChan/exportPubSubChan/exportAppDataChan
+//read data from io.Reader and pass them to exportCtrlChan
 func (s *stream) inputMainLoop() {
 	s.Log(LOG_INFO, "inputMainLoop start")
 	cont := true
@@ -183,7 +157,7 @@ func (s *stream) inputMainLoop() {
 	}
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
-	s.exportConnChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
+	s.exportCtrlChan <- &genericMsg{Id: s.proxy.router.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
 	//s.closeImpl() only called from outputMainLoop
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
@@ -211,7 +185,7 @@ func (s *stream) recv() (err os.Error) {
 			//s.Raise(err)
 			return
 		}
-		s.exportConnChan <- &genericMsg{id, cim}
+		s.exportCtrlChan <- &genericMsg{id, cim}
 	case id.Match(r.SysID(PubId)):
 		fallthrough
 	case id.Match(r.SysID(UnPubId)):
@@ -226,10 +200,10 @@ func (s *stream) recv() (err os.Error) {
 			//s.Raise(err)
 			return
 		}
-		s.exportPubSubChan <- &genericMsg{id, icm}
+		s.exportCtrlChan <- &genericMsg{id, icm}
 	default: //appMsg
 		if id.Scope() == NumScope && id.Member() == NumMembership { //chan is closed
-			s.exportAppDataChan <- &genericMsg{id, chanCloseMsg{}}
+			s.peer.sendAppData(id, chanCloseMsg{})
 		} else {
 			chanType := s.proxy.getExportRecvChanType(id)
 			if chanType == nil {
@@ -250,7 +224,7 @@ func (s *stream) recv() (err os.Error) {
 				//s.Raise(err)
 				return
 			}
-			s.exportAppDataChan <- &genericMsg{id, val.Interface()}
+			s.peer.sendAppData(id, val.Interface())
 		}
 	}
 	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))

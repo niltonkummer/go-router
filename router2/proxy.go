@@ -27,41 +27,27 @@ import (
 type Proxy interface {
 	Connect(Proxy) os.Error
 	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) os.Error
-	Start()
 	Close()
 }
 
-type peerCommand int
-
-const (
-	peerStart peerCommand = iota
-	peerPause
-	peerClose
-	peerGC
-)
-
-//common interface for all connection peers (Proxy, Stream) which should embed this
-type peerBase struct {
-	//imported chans from peer to allow peer send msgs to us
-	importConnChan    chan *genericMsg
-	importPubSubChan  chan *genericMsg
-	importAppDataChan chan *genericMsg
-	//exported chans for sending msgs to peer
-	exportConnChan    chan *genericMsg
-	exportPubSubChan  chan *genericMsg
-	exportAppDataChan chan *genericMsg
+type peerIntf interface {
+	//send app data to peer
+	sendAppData(Id, interface{}) os.Error
 }
 
 type proxyImpl struct {
-	peerBase
-	myCmdChan chan peerCommand
+	//imported chan to recv ctrl msgs from peer
+	importCtrlChan chan *genericMsg
+	//exported chan to send ctrl msgs to peer
+	exportCtrlChan chan *genericMsg
+	//use peerIntf.sendAppData() to forward app msgs to peer (proxy or stream)
+	peer peerIntf
 	//my/local router
 	router *routerImpl
 	//chans connecting to local router
-	sysChans           *sysChans
-	appSendChans       *sendChanBundle //send to local router
-	appRecvChans       *recvChanBundle //recv from local router
-	forwardAppDataChan chan *genericMsg
+	sysChans     *sysChans
+	appSendChans *sendChanBundle //send to local router
+	appRecvChans *recvChanBundle //recv from local router
 	//filter & translator
 	filter     IdFilter
 	translator IdTranslator
@@ -95,24 +81,14 @@ func NewProxy(r Router, name string, f IdFilter, t IdTranslator) Proxy {
 	p.filter = f
 	p.translator = t
 	//create import chans
-	p.myCmdChan = make(chan peerCommand, DefCmdChanBufSize)
-	p.exportConnChan = make(chan *genericMsg, p.router.defChanBufSize)
-	p.exportPubSubChan = make(chan *genericMsg, p.router.defChanBufSize)
-	p.exportAppDataChan = make(chan *genericMsg, p.router.defChanBufSize)
+	p.exportCtrlChan = make(chan *genericMsg, DefCmdChanBufSize)
 	//chans to local router
 	p.sysChans = newSysChans(p)
 	p.appSendChans = newSendChanBundle(p.router, ScopeLocal, MemberRemote)
 	if p.translator == nil {
-		p.appRecvChans = newRecvChanBundle(p.router, ScopeLocal, MemberRemote, p.exportAppDataChan)
+		p.appRecvChans = newRecvChanBundle(p.router, ScopeLocal, MemberRemote, func(msg *genericMsg) { p.peer.sendAppData(msg.Id, msg.Data) })
 	} else {
-		p.forwardAppDataChan = make(chan *genericMsg, p.router.defChanBufSize)
-		p.appRecvChans = newRecvChanBundle(p.router, ScopeLocal, MemberRemote, p.forwardAppDataChan)
-		//start outgoing id translation goroutine
-		go func() {
-			for v := range p.forwardAppDataChan {
-				p.exportAppDataChan <- &genericMsg{p.translator.TranslateOutward(v.Id), v.Data}
-			}
-		}()
+		p.appRecvChans = newRecvChanBundle(p.router, ScopeLocal, MemberRemote, func(msg *genericMsg) { p.peer.sendAppData(p.translator.TranslateOutward(msg.Id), msg.Data) })
 	}
 	//cache: only need to create import cache, since export cache are queried/returned from router
 	p.importSendIds = make(map[interface{}]*IdChanInfo)
@@ -133,37 +109,33 @@ func NewProxy(r Router, name string, f IdFilter, t IdTranslator) Proxy {
 
 func (p1 *proxyImpl) Connect(pp Proxy) os.Error {
 	p2 := pp.(*proxyImpl)
-	p1.importConnChan = p2.exportConnChan
-	p1.importPubSubChan = p2.exportPubSubChan
-	p1.importAppDataChan = p2.exportAppDataChan
-	p2.importConnChan = p1.exportConnChan
-	p2.importPubSubChan = p1.exportPubSubChan
-	p2.importAppDataChan = p1.exportAppDataChan
+	p1.importCtrlChan = p2.exportCtrlChan
+	p2.importCtrlChan = p1.exportCtrlChan
+	p2.peer = p1
+	p1.peer = p2
 	p1.errChan = make(chan os.Error)
-	p1.Start()
-	p2.Start()
+	p1.start()
+	p2.start()
 	return <-p1.errChan
 }
 
 func (p *proxyImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) os.Error {
 	s := newStream(rwc, mar, p)
-	p.importConnChan = s.exportConnChan
-	p.importPubSubChan = s.exportPubSubChan
-	p.importAppDataChan = s.exportAppDataChan
-	s.importConnChan = p.exportConnChan
-	s.importPubSubChan = p.exportPubSubChan
-	s.importAppDataChan = p.exportAppDataChan
+	p.importCtrlChan = s.exportCtrlChan
+	s.importCtrlChan = p.exportCtrlChan
+	s.peer = p
+	p.peer = s
 	p.errChan = make(chan os.Error)
-	p.Start()
-	s.Start()
+	p.start()
+	s.start()
 	return <-p.errChan
 }
 
-func (p *proxyImpl) Start() { go p.ctrlMainLoop() }
+func (p *proxyImpl) start() { go p.ctrlMainLoop() }
 
 func (p *proxyImpl) Close() {
 	p.Log(LOG_INFO, "proxy.Close() is called")
-	p.myCmdChan <- peerClose
+	close(p.importCtrlChan)
 }
 
 func (p *proxyImpl) closeImpl() {
@@ -178,16 +150,10 @@ func (p *proxyImpl) closeImpl() {
 		p.Log(LOG_INFO, "proxy closing")
 		p.Closed = true
 		p.router.delProxy(p)
-		//notify dataMainLoop() to exit
-		close(p.importAppDataChan)
 		//close my chans
 		p.appRecvChans.Close()
 		p.appSendChans.Close()
 		p.sysChans.Close()
-		//notify outgoing translation goroutine to exit
-		if p.forwardAppDataChan != nil {
-			close(p.forwardAppDataChan)
-		}
 		//close logger
 		p.FaultRaiser.Close()
 		p.Logger.Close()
@@ -198,9 +164,9 @@ func (p *proxyImpl) closeImpl() {
 func (p *proxyImpl) connSetup() os.Error {
 	r := p.router
 	//1. to initiate conn setup handshaking, send my conn info to peer
-	p.exportConnChan <- &genericMsg{Id: r.SysID(RouterConnId), Data: &ConnInfoMsg{SeedId: p.router.seedId}}
+	p.exportCtrlChan <- &genericMsg{Id: r.SysID(RouterConnId), Data: &ConnInfoMsg{SeedId: p.router.seedId}}
 	//2. recv connInfo from peer
-	switch m := <-p.importConnChan; {
+	switch m := <-p.importCtrlChan; {
 	case m.Id.Match(r.SysID(RouterConnId)):
 		//save peer conninfo & forward it
 		ci := m.Data.(*ConnInfoMsg)
@@ -212,72 +178,60 @@ func (p *proxyImpl) connSetup() os.Error {
 			//tell local listeners about the fail
 			p.sysChans.SendConnInfo(ConnErrorId, ci)
 			//tell peer about fail
-			p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
+			p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
 			p.LogError(err)
 			return err
 		}
 	default:
 		err := os.ErrorString(errConnInvalidMsg)
 		//tell peer about fail
-		p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
+		p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
 		p.LogError(err)
 		return err
 	}
 	//3. send initial pub/sub info to peer
-	p.exportPubSubChan <- &genericMsg{Id: r.SysID(PubId), Data: p.initPubInfoMsg()}
-	p.exportPubSubChan <- &genericMsg{Id: r.SysID(SubId), Data: p.initSubInfoMsg()}
+	p.exportCtrlChan <- &genericMsg{Id: r.SysID(PubId), Data: p.initPubInfoMsg()}
+	p.exportCtrlChan <- &genericMsg{Id: r.SysID(SubId), Data: p.initSubInfoMsg()}
 	//4. handle init_pub/sub msgs, send connReady to peer and wait for peer's connReady
 	peerReady := false
 	myReady := false
 	for !(peerReady && myReady) {
-		select {
-		case m := <-p.importConnChan:
-			switch {
-			case m.Id.Match(r.SysID(ConnReadyId)):
-				p.sysChans.SendConnInfo(ConnReadyId, m.Data.(*ConnInfoMsg))
-				peerReady = true
-			case m.Id.Match(r.SysID(ConnErrorId)):
-				ci := m.Data.(*ConnInfoMsg)
-				p.sysChans.SendConnInfo(ConnErrorId, ci)
-				p.LogError(ci.Error)
-				return ci.Error
-			default:
-				err := os.ErrorString(errConnInvalidMsg)
+		switch m := <-p.importCtrlChan; {
+		case m.Id.Match(r.SysID(ConnReadyId)):
+			p.sysChans.SendConnInfo(ConnReadyId, m.Data.(*ConnInfoMsg))
+			peerReady = true
+		case m.Id.Match(r.SysID(ConnErrorId)):
+			ci := m.Data.(*ConnInfoMsg)
+			p.sysChans.SendConnInfo(ConnErrorId, ci)
+			p.LogError(ci.Error)
+			return ci.Error
+		case m.Id.Match(r.SysID(PubId)):
+			_, err := p.handlePeerPubMsg(m)
+			p.sysChans.SendPubSubInfo(PubId, m.Data.(*IdChanInfoMsg))
+			if err != nil {
 				//tell peer about fail
-				p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
-				p.LogError(err)
-				return err //how to inform the failure?
-			}
-		case m := <-p.importPubSubChan:
-			switch {
-			case m.Id.Match(r.SysID(PubId)):
-				_, err := p.handlePeerPubMsg(m)
-				p.sysChans.SendPubSubInfo(PubId, m.Data.(*IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
-					p.LogError(err)
-					return err
-				}
-			case m.Id.Match(r.SysID(SubId)):
-				_, err := p.handlePeerSubMsg(m)
-				p.sysChans.SendPubSubInfo(SubId, m.Data.(*IdChanInfoMsg))
-				if err != nil {
-					//tell peer about fail
-					p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
-					p.LogError(err)
-					return err
-				}
-				myReady = true
-				//tell peer i am ready
-				p.exportConnChan <- &genericMsg{Id: r.SysID(ConnReadyId), Data: &ConnInfoMsg{}}
-			default:
-				err := os.ErrorString(errConnInvalidMsg)
-				//tell peer about fail
-				p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
 				p.LogError(err)
 				return err
 			}
+		case m.Id.Match(r.SysID(SubId)):
+			_, err := p.handlePeerSubMsg(m)
+			p.sysChans.SendPubSubInfo(SubId, m.Data.(*IdChanInfoMsg))
+			if err != nil {
+				//tell peer about fail
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
+				p.LogError(err)
+				return err
+			}
+			myReady = true
+			//tell peer i am ready
+			p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnReadyId), Data: &ConnInfoMsg{}}
+		default:
+			err := os.ErrorString(errConnInvalidMsg)
+			//tell peer about fail
+			p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: &ConnInfoMsg{Error: err}}
+			p.LogError(err)
+			return err
 		}
 	}
 	return nil
@@ -299,7 +253,6 @@ func (p *proxyImpl) ctrlMainLoop() {
 	}
 
 	//at here, conn is ready, activate recv/forward goroutines
-	go p.dataMainLoop()
 	p.sysChans.Start()
 	p.appRecvChans.Start()
 
@@ -313,14 +266,14 @@ func (p *proxyImpl) ctrlMainLoop() {
 		//give conn msgs, pubSub msgs higher priority by duplicating them twice
 		//put app data chan at very last
 		select {
-		case cmd := <-p.myCmdChan:
-			if cmd == peerClose {
+		case m := <-p.sysChans.pubSubInfo:
+			if closed(p.sysChans.pubSubInfo) {
 				//tell peer exiting
 				p.Log(LOG_INFO, "proxy shutdown, send peer Disconn msg")
-				p.exportConnChan <- &genericMsg{Id: r.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
 				cont = false
+				break
 			}
-		case m := <-p.sysChans.pubSubInfo:
 			switch {
 			case m.Id.Match(r.SysID(PubId)):
 				_, err = p.handleLocalPubMsg(m)
@@ -334,12 +287,19 @@ func (p *proxyImpl) ctrlMainLoop() {
 			if err != nil {
 				//tell peer about fail
 				ci := &ConnInfoMsg{Error: err}
-				p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: ci}
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: ci}
 				p.sysChans.SendConnInfo(ConnErrorId, ci)
 				p.LogError(err)
 				cont = false
 			}
-		case m := <-p.importConnChan:
+		case m := <-p.importCtrlChan:
+			if closed(p.importCtrlChan) {
+				//tell peer exiting
+				p.Log(LOG_INFO, "proxy shutdown, send peer Disconn msg")
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(RouterDisconnId), Data: &ConnInfoMsg{}}
+				cont = false
+				break
+			}
 			switch {
 			case m.Id.Match(r.SysID(RouterDisconnId)):
 				p.sysChans.SendConnInfo(RouterDisconnId, m.Data.(*ConnInfoMsg))
@@ -350,9 +310,6 @@ func (p *proxyImpl) ctrlMainLoop() {
 				p.sysChans.SendConnInfo(ConnErrorId, ci)
 				p.LogError(ci.Error)
 				cont = false
-			}
-		case m := <-p.importPubSubChan:
-			switch {
 			case m.Id.Match(r.SysID(PubId)):
 				_, err = p.handlePeerPubMsg(m)
 				p.sysChans.SendPubSubInfo(PubId, m.Data.(*IdChanInfoMsg))
@@ -369,7 +326,7 @@ func (p *proxyImpl) ctrlMainLoop() {
 			if err != nil {
 				//tell peer about fail
 				ci := &ConnInfoMsg{Error: err}
-				p.exportConnChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: ci}
+				p.exportCtrlChan <- &genericMsg{Id: r.SysID(ConnErrorId), Data: ci}
 				p.sysChans.SendConnInfo(ConnErrorId, ci)
 				p.LogError(err)
 				cont = false
@@ -380,28 +337,13 @@ func (p *proxyImpl) ctrlMainLoop() {
 	p.closeImpl()
 }
 
-func (p *proxyImpl) dataMainLoop() {
-	p.Log(LOG_INFO, "-- dataMainLoop start")
-	for {
-		p.Log(LOG_INFO, "proxy wait for another app msg")
-		m := <-p.importAppDataChan
-		if closed(p.importAppDataChan) {
-			p.Log(LOG_INFO, "proxy importAppDataChan closed")
-			break
-		}
-		p.Log(LOG_INFO, "proxy dataMainLoop recv/forward app msg")
-		var err os.Error
-		if p.translator != nil {
-			err = p.appSendChans.Send(p.translator.TranslateInward(m.Id), m.Data)
-		} else {
-			err = p.appSendChans.Send(m.Id, m.Data)
-		}
-		if err != nil {
-			p.LogError(err)
-		}
-		p.Log(LOG_INFO, "proxy finish one app msg")
+func (p *proxyImpl) sendAppData(id Id, data interface{}) (err os.Error) {
+	if p.translator != nil {
+		err = p.appSendChans.Send(p.translator.TranslateInward(id), data)
+	} else {
+		err = p.appSendChans.Send(id, data)
 	}
-	p.Log(LOG_INFO, "-- dataMainLoop exit")
+	return
 }
 
 func (p *proxyImpl) chanTypeMatch(info1, info2 *IdChanInfo) bool {
@@ -502,7 +444,7 @@ func (p *proxyImpl) handleLocalSubMsg(m *genericMsg) (num int, err os.Error) {
 	if num > 0 {
 		if p.translator == nil {
 			if num == len(sInfo) {
-				p.exportPubSubChan <- m
+				p.exportCtrlChan <- m
 			} else {
 				sInfo2 := make([]*IdChanInfo, num)
 				cnt := 0
@@ -515,7 +457,7 @@ func (p *proxyImpl) handleLocalSubMsg(m *genericMsg) (num int, err os.Error) {
 						break
 					}
 				}
-				p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
+				p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
 			}
 		} else {
 			sInfo2 := make([]*IdChanInfo, num)
@@ -532,7 +474,7 @@ func (p *proxyImpl) handleLocalSubMsg(m *genericMsg) (num int, err os.Error) {
 					break
 				}
 			}
-			p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
+			p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
 		}
 	}
 	return
@@ -589,7 +531,7 @@ func (p *proxyImpl) handleLocalUnSubMsg(m *genericMsg) (num int, err os.Error) {
 	if num > 0 {
 		if p.translator == nil {
 			if num == len(sInfo) {
-				p.exportPubSubChan <- m
+				p.exportCtrlChan <- m
 			} else {
 				sInfo2 := make([]*IdChanInfo, num)
 				cnt := 0
@@ -602,7 +544,7 @@ func (p *proxyImpl) handleLocalUnSubMsg(m *genericMsg) (num int, err os.Error) {
 						break
 					}
 				}
-				p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
+				p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
 			}
 		} else {
 			sInfo2 := make([]*IdChanInfo, num)
@@ -619,7 +561,7 @@ func (p *proxyImpl) handleLocalUnSubMsg(m *genericMsg) (num int, err os.Error) {
 					break
 				}
 			}
-			p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
+			p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: &IdChanInfoMsg{Info: sInfo2}}
 		}
 	}
 	return
@@ -660,7 +602,7 @@ func (p *proxyImpl) handleLocalPubMsg(m *genericMsg) (num int, err os.Error) {
 	if num > 0 {
 		if p.translator == nil {
 			if num == len(pInfo) {
-				p.exportPubSubChan <- m
+				p.exportCtrlChan <- m
 			} else {
 				pInfo2 := make([]*IdChanInfo, num)
 				cnt := 0
@@ -673,7 +615,7 @@ func (p *proxyImpl) handleLocalPubMsg(m *genericMsg) (num int, err os.Error) {
 						break
 					}
 				}
-				p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: pInfo2}
+				p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: pInfo2}
 			}
 		} else {
 			pInfo2 := make([]*IdChanInfo, num)
@@ -690,7 +632,7 @@ func (p *proxyImpl) handleLocalPubMsg(m *genericMsg) (num int, err os.Error) {
 					break
 				}
 			}
-			p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: pInfo2}
+			p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: pInfo2}
 		}
 	}
 	return
@@ -757,7 +699,7 @@ func (p *proxyImpl) handleLocalUnPubMsg(m *genericMsg) (num int, err os.Error) {
 	if num > 0 {
 		if p.translator == nil {
 			if num == len(pInfo) {
-				p.exportPubSubChan <- m
+				p.exportCtrlChan <- m
 			} else {
 				pInfo2 := make([]*IdChanInfo, num)
 				cnt := 0
@@ -770,7 +712,7 @@ func (p *proxyImpl) handleLocalUnPubMsg(m *genericMsg) (num int, err os.Error) {
 						break
 					}
 				}
-				p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: pInfo2}
+				p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: pInfo2}
 			}
 		} else {
 			pInfo2 := make([]*IdChanInfo, num)
@@ -787,7 +729,7 @@ func (p *proxyImpl) handleLocalUnPubMsg(m *genericMsg) (num int, err os.Error) {
 					break
 				}
 			}
-			p.exportPubSubChan <- &genericMsg{Id: m.Id, Data: pInfo2}
+			p.exportCtrlChan <- &genericMsg{Id: m.Id, Data: pInfo2}
 		}
 	}
 	return
@@ -847,7 +789,7 @@ func (p *proxyImpl) handlePeerSubMsg(m *genericMsg) (num int, err os.Error) {
 		}
 	}
 	if num > 0 {
-		p.exportPubSubChan <- &genericMsg{Id: p.router.SysID(PubId), Data: &IdChanInfoMsg{Info: pInfo[0:num]}}
+		p.exportCtrlChan <- &genericMsg{Id: p.router.SysID(PubId), Data: &IdChanInfoMsg{Info: pInfo[0:num]}}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerSubMsg, return PubMsg for : %v", pInfo[0].Id))
 	}
 	return
@@ -920,7 +862,7 @@ func (p *proxyImpl) handlePeerPubMsg(m *genericMsg) (num int, err os.Error) {
 	}
 	//return a SubMsg to peer so that a recver can be added at peer side
 	if num > 0 {
-		p.exportPubSubChan <- &genericMsg{Id: p.router.SysID(SubId), Data: &IdChanInfoMsg{Info: sInfo[0:num]}}
+		p.exportCtrlChan <- &genericMsg{Id: p.router.SysID(SubId), Data: &IdChanInfoMsg{Info: sInfo[0:num]}}
 		p.Log(LOG_INFO, fmt.Sprintf("handlePeerPubMsg, return SubMsg for : %v", sInfo[0].Id))
 	}
 	return
@@ -1026,180 +968,65 @@ func (p *proxyImpl) importSubInfo() []*IdChanInfo {
 //utils:
 //sysChans: wrapper of sys chans
 type sysChans struct {
-	proxy *proxyImpl
-	//chans to subscribe to local router name-space changes
-	nsRecvChans [4]chan *IdChanInfoMsg
-	//pubsubInfo chan will aggregate msgs from all the above chans to forward to proxy mainloop
+	proxy      *proxyImpl
 	pubSubInfo chan *genericMsg
-	//chans to publish conn related events to local router
-	//at most we can only have 4 of them: conn/disconn/ready/connError
-	connSendChans   [4]chan *ConnInfoMsg
-	connBindChans   [4]chan *BindEvent
-	connSendEnabled [4]bool
-	//chans to publish remote pub/sub events to local router
-	pubSubSendChans [4]chan *IdChanInfoMsg
-	psBindChans     [4]chan *BindEvent
-	psSendEnabled   [4]bool
-	//
-	sysIds  [NumSysIds]Id
-	done    chan bool
-	started bool
+	//chans to talk to local router
+	sysRecvChans *recvChanBundle //recv from local router
+	sysSendChans *sendChanBundle //send to local router
 }
 
 func (sc *sysChans) Close() {
 	sc.proxy.Log(LOG_INFO, "proxy sysChan closing start")
-	sc.done <- true
-	r := sc.proxy.router
-	r.DetachChan(sc.sysIds[PubId], sc.nsRecvChans[0])
-	r.DetachChan(sc.sysIds[UnPubId], sc.nsRecvChans[1])
-	r.DetachChan(sc.sysIds[SubId], sc.nsRecvChans[2])
-	r.DetachChan(sc.sysIds[UnSubId], sc.nsRecvChans[3])
-	r.DetachChan(sc.sysIds[RouterConnId], sc.connSendChans[0])
-	r.DetachChan(sc.sysIds[RouterDisconnId], sc.connSendChans[1])
-	r.DetachChan(sc.sysIds[ConnErrorId], sc.connSendChans[2])
-	r.DetachChan(sc.sysIds[ConnReadyId], sc.connSendChans[3])
-	r.DetachChan(sc.sysIds[PubId], sc.pubSubSendChans[0])
-	r.DetachChan(sc.sysIds[UnPubId], sc.pubSubSendChans[1])
-	r.DetachChan(sc.sysIds[SubId], sc.pubSubSendChans[2])
-	r.DetachChan(sc.sysIds[UnSubId], sc.pubSubSendChans[3])
+	sc.sysRecvChans.Close()
+	sc.sysSendChans.Close()
 	sc.proxy.Log(LOG_INFO, "proxy sysChan closed")
 }
 
 func (sc *sysChans) SendConnInfo(idx int, data *ConnInfoMsg) {
-	if idx < RouterConnId || idx > ConnReadyId {
-		sc.proxy.Log(LOG_ERROR, "proxy: Invalid sys id passed to SendConnInfo")
-	} else {
-		if len(sc.connBindChans[idx]) > 0 {
-			for {
-				v, ok := <-sc.connBindChans[idx]
-				if !ok {
-					break
-				}
-				if v.Count > 0 {
-					sc.connSendEnabled[idx] = true
-				} else {
-					sc.connSendEnabled[idx] = false
-				}
-			}
-		}
-		if sc.connSendEnabled[idx] {
-			sc.connSendChans[idx] <- data
-		}
-	}
+	sc.sysSendChans.Send(sc.proxy.router.SysID(idx), data)
 }
 
 func (sc *sysChans) SendPubSubInfo(idx int, data *IdChanInfoMsg) {
-	if idx < PubId || idx > UnSubId {
-		sc.proxy.Log(LOG_ERROR, "proxy: Invalid sys id passed to SendPubSubInfo")
-	} else {
-		if len(sc.psBindChans[idx-PubId]) > 0 {
-			for {
-				v, ok := <-sc.psBindChans[idx-PubId]
-				if !ok {
-					break
-				}
-				if v.Count > 0 {
-					sc.psSendEnabled[idx-PubId] = true
-				} else {
-					sc.psSendEnabled[idx-PubId] = false
-				}
+	if idx >= PubId || idx <= UnSubId {
+		//filter out sys internal ids
+		info := make([]*IdChanInfo, len(data.Info))
+		num := 0
+		for i := 0; i < len(data.Info); i++ {
+			if sc.proxy.router.getSysInternalIdIdx(data.Info[i].Id) < 0 {
+				info[num] = data.Info[i]
+				num++
 			}
 		}
-		if sc.psSendEnabled[idx-PubId] {
-			//filter out sys internal ids
-			info := make([]*IdChanInfo, len(data.Info))
-			num := 0
-			for i := 0; i < len(data.Info); i++ {
-				if sc.proxy.router.getSysInternalIdIdx(data.Info[i].Id) < 0 {
-					info[num] = data.Info[i]
-					num++
-				}
-			}
-			sc.pubSubSendChans[idx-PubId] <- &IdChanInfoMsg{info[0:num]}
-			//sc.pubSubSendChans[idx-PubId] <- data
-		}
+		sc.sysSendChans.Send(sc.proxy.router.SysID(idx), &IdChanInfoMsg{info[0:num]})
 	}
 }
 
-func (sc *sysChans) mainLoop() {
-	sc.proxy.Log(LOG_INFO, "sysChan recver mainloop started")
-	r := sc.proxy.router
-	cont := true
-	for cont {
-		select {
-		case <-sc.done:
-			cont = false
-		case v := <-sc.nsRecvChans[0]:
-			if !closed(sc.nsRecvChans[0]) {
-				sc.proxy.Log(LOG_INFO, "forward PubId msg")
-				sc.pubSubInfo <- &genericMsg{Id: r.SysID(PubId), Data: v}
-			} else {
-				cont = false
-			}
-		case v := <-sc.nsRecvChans[1]:
-			if !closed(sc.nsRecvChans[1]) {
-				sc.proxy.Log(LOG_INFO, "forward UnPubId msg")
-				sc.pubSubInfo <- &genericMsg{Id: r.SysID(UnPubId), Data: v}
-			} else {
-				cont = false
-			}
-		case v := <-sc.nsRecvChans[2]:
-			if !closed(sc.nsRecvChans[2]) {
-				sc.proxy.Log(LOG_INFO, "forward SubId msg")
-				sc.pubSubInfo <- &genericMsg{Id: r.SysID(SubId), Data: v}
-			} else {
-				cont = false
-			}
-		case v := <-sc.nsRecvChans[3]:
-			if !closed(sc.nsRecvChans[3]) {
-				sc.proxy.Log(LOG_INFO, "forward UnSubId msg")
-				sc.pubSubInfo <- &genericMsg{Id: r.SysID(UnSubId), Data: v}
-			} else {
-				cont = false
-			}
-		}
-	}
-}
-
-func (sc *sysChans) Start() {
-	if !sc.started {
-		sc.started = true
-		go sc.mainLoop()
-	}
-}
+func (sc *sysChans) Start() { sc.sysRecvChans.Start() }
 
 func newSysChans(p *proxyImpl) *sysChans {
 	sc := new(sysChans)
 	sc.proxy = p
-	r := sc.proxy.router
-	sc.pubSubInfo = make(chan *genericMsg, r.defChanBufSize)
-	for i := 0; i < 4; i++ {
-		sc.nsRecvChans[i] = make(chan *IdChanInfoMsg, r.defChanBufSize)
-		sc.connSendChans[i] = make(chan *ConnInfoMsg, 4) //at most 1 msg for each of 4 conn msg types
-		sc.connBindChans[i] = make(chan *BindEvent, 1)
-		sc.pubSubSendChans[i] = make(chan *IdChanInfoMsg, r.defChanBufSize)
-		sc.psBindChans[i] = make(chan *BindEvent, 1)
-	}
-	sc.done = make(chan bool)
-	sc.sysIds[RouterConnId] = r.NewSysID(RouterConnId, ScopeLocal, MemberRemote)
-	sc.sysIds[RouterDisconnId] = r.NewSysID(RouterDisconnId, ScopeLocal, MemberRemote)
-	sc.sysIds[ConnErrorId] = r.NewSysID(ConnErrorId, ScopeLocal, MemberRemote)
-	sc.sysIds[ConnReadyId] = r.NewSysID(ConnReadyId, ScopeLocal, MemberRemote)
-	sc.sysIds[PubId] = r.NewSysID(PubId, ScopeLocal, MemberRemote)
-	sc.sysIds[UnPubId] = r.NewSysID(UnPubId, ScopeLocal, MemberRemote)
-	sc.sysIds[SubId] = r.NewSysID(SubId, ScopeLocal, MemberRemote)
-	sc.sysIds[UnSubId] = r.NewSysID(UnSubId, ScopeLocal, MemberRemote)
-	r.AttachRecvChan(sc.sysIds[PubId], sc.nsRecvChans[0])
-	r.AttachRecvChan(sc.sysIds[UnPubId], sc.nsRecvChans[1])
-	r.AttachRecvChan(sc.sysIds[SubId], sc.nsRecvChans[2])
-	r.AttachRecvChan(sc.sysIds[UnSubId], sc.nsRecvChans[3])
-	r.AttachSendChan(sc.sysIds[RouterConnId], sc.connSendChans[0], sc.connBindChans[0])
-	r.AttachSendChan(sc.sysIds[RouterDisconnId], sc.connSendChans[1], sc.connBindChans[1])
-	r.AttachSendChan(sc.sysIds[ConnErrorId], sc.connSendChans[2], sc.connBindChans[2])
-	r.AttachSendChan(sc.sysIds[ConnReadyId], sc.connSendChans[3], sc.connBindChans[3])
-	r.AttachSendChan(sc.sysIds[PubId], sc.pubSubSendChans[0], sc.psBindChans[0])
-	r.AttachSendChan(sc.sysIds[UnPubId], sc.pubSubSendChans[1], sc.psBindChans[1])
-	r.AttachSendChan(sc.sysIds[SubId], sc.pubSubSendChans[2], sc.psBindChans[2])
-	r.AttachSendChan(sc.sysIds[UnSubId], sc.pubSubSendChans[3], sc.psBindChans[3])
+	r := p.router
+	sc.pubSubInfo = make(chan *genericMsg, DefCmdChanBufSize)
+	sc.sysRecvChans = newRecvChanBundle(r, ScopeLocal, MemberRemote, func(m *genericMsg) { sc.pubSubInfo <- m })
+	sc.sysRecvChans.dropChanCloseMsg = true
+	sc.sysSendChans = newSendChanBundle(r, ScopeLocal, MemberRemote)
+	//
+	pubSubChanType := reflect.Typeof(make(chan *IdChanInfoMsg)).(*reflect.ChanType)
+	connChanType := reflect.Typeof(make(chan *ConnInfoMsg)).(*reflect.ChanType)
+
+	sc.sysRecvChans.AddRecver(r.SysID(PubId), pubSubChanType)
+	sc.sysRecvChans.AddRecver(r.SysID(UnPubId), pubSubChanType)
+	sc.sysRecvChans.AddRecver(r.SysID(SubId), pubSubChanType)
+	sc.sysRecvChans.AddRecver(r.SysID(UnSubId), pubSubChanType)
+
+	sc.sysSendChans.AddSender(r.SysID(RouterConnId), connChanType)
+	sc.sysSendChans.AddSender(r.SysID(RouterDisconnId), connChanType)
+	sc.sysSendChans.AddSender(r.SysID(ConnErrorId), connChanType)
+	sc.sysSendChans.AddSender(r.SysID(ConnReadyId), connChanType)
+	sc.sysSendChans.AddSender(r.SysID(PubId), pubSubChanType)
+	sc.sysSendChans.AddSender(r.SysID(UnPubId), pubSubChanType)
+	sc.sysSendChans.AddSender(r.SysID(SubId), pubSubChanType)
+	sc.sysSendChans.AddSender(r.SysID(UnSubId), pubSubChanType)
 	return sc
 }

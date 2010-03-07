@@ -11,7 +11,6 @@ import (
 	"json"
 	"bytes"
 	"strconv"
-	"strings"
 	"fmt"
 	"io"
 	"os"
@@ -294,7 +293,7 @@ func (jm *jsonMarshaler) encodeBool(v bool) (err os.Error) {
 		return
 	}
 	dlen := fmt.Sprintf("%10d", jm.buf.Len())
-	if _, err = jm.writer.Write(strings.Bytes(dlen)); err != nil {
+	if _, err = jm.writer.Write([]byte(dlen)); err != nil {
 		return
 	}
 	_, err = jm.writer.Write(jm.buf.Bytes())
@@ -308,7 +307,7 @@ func (jm *jsonMarshaler) encodeInt(v int) (err os.Error) {
 		return
 	}
 	dlen := fmt.Sprintf("%10d", jm.buf.Len())
-	if _, err = jm.writer.Write(strings.Bytes(dlen)); err != nil {
+	if _, err = jm.writer.Write([]byte(dlen)); err != nil {
 		return
 	}
 	_, err = jm.writer.Write(jm.buf.Bytes())
@@ -322,7 +321,7 @@ func (jm *jsonMarshaler) encodeFloat(v float) (err os.Error) {
 		return
 	}
 	dlen := fmt.Sprintf("%10d", jm.buf.Len())
-	if _, err = jm.writer.Write(strings.Bytes(dlen)); err != nil {
+	if _, err = jm.writer.Write([]byte(dlen)); err != nil {
 		return
 	}
 	_, err = jm.writer.Write(jm.buf.Bytes())
@@ -336,7 +335,7 @@ func (jm *jsonMarshaler) encodeStr(v string) (err os.Error) {
 		return
 	}
 	dlen := fmt.Sprintf("%10d", jm.buf.Len())
-	if _, err = jm.writer.Write(strings.Bytes(dlen)); err != nil {
+	if _, err = jm.writer.Write([]byte(dlen)); err != nil {
 		return
 	}
 	_, err = jm.writer.Write(jm.buf.Bytes())
@@ -350,7 +349,7 @@ func (jm *jsonMarshaler) encodeStruct(e interface{}) (err os.Error) {
 		return
 	}
 	dlen := fmt.Sprintf("%10d", jm.buf.Len())
-	if _, err = jm.writer.Write(strings.Bytes(dlen)); err != nil {
+	if _, err = jm.writer.Write([]byte(dlen)); err != nil {
 		return
 	}
 	_, err = jm.writer.Write(jm.buf.Bytes())

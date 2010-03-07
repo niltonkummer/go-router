@@ -8,6 +8,7 @@ package router
 
 import (
 	"reflect"
+	"sync"
 )
 
 type endpointType int
@@ -20,34 +21,28 @@ const (
 type Endpoint struct {
 	kind       endpointType
 	Id         Id
+	Chan       *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
+	dispatcher Dispatcher         //current for push dispacher, only sender uses dispatcher
 	bindChan   chan *BindEvent
-	extIntf    *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
-	Chan       chan interface{}   //sendChan for sender, recvChan for recver, internal to router
-	bindings   []*Endpoint        //binding_set
-	cmdChan    chan *command
-	dispatcher Dispatcher //current for push dispacher, only sender uses dispatcher
+	bindLock   sync.Mutex
+	bindings   []*Endpoint //binding_set
+	flag       bool        //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 }
 
-func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue) *Endpoint {
+func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue, bc chan *BindEvent) *Endpoint {
 	endp := &Endpoint{}
 	endp.kind = t
 	endp.Id = id
-	endp.extIntf = ch
+	endp.Chan = ch
+	endp.bindChan = bc
 	return endp
 }
 
 func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
-	if e.Chan != nil {
-		return //already started
-	}
-	e.Chan = make(chan interface{}, bufSize)
 	e.bindings = make([]*Endpoint, 0, DefBindingSetSize)
-	e.cmdChan = make(chan *command, DefCmdChanBufSize)
 	if e.kind == senderType {
 		e.dispatcher = disp.NewDispatcher()
 		go e.senderLoop()
-	} else {
-		go e.recverLoop()
 	}
 }
 
@@ -55,91 +50,23 @@ func (e *Endpoint) Close() {
 	if e.bindChan != nil {
 		close(e.bindChan)
 	}
-	e.extIntf.Close()
-	close(e.Chan)
-	close(e.cmdChan)
-	//e.cmdChan <- &command{kind:shutdown}
-}
-
-func (e *Endpoint) handleCmd(cmd *command) (cont bool) {
-	cont = true
-	switch cmd.kind {
-	case attach:
-		e.attachImpl(cmd.data.(*Endpoint), cmd.rspChan)
-	case detach:
-		e.detachImpl(cmd.data.(*Endpoint))
-	case shutdown:
-		e.cleanup()
-		//drain all pending commands and exit
-		for {
-			_, ok := <-e.cmdChan
-			if !ok {
-				break
-			}
-		}
-		cont = false
-	}
-	return
-}
-
-func (e *Endpoint) recverLoop() {
-	for cmd := range e.cmdChan {
-		e.handleCmd(cmd)
-	}
+	e.Chan.Close()
 }
 
 func (e *Endpoint) senderLoop() {
 	cont := true
-	count := 0
 	for cont {
-		if len(e.bindings) == 0 {
-			// no recver, only wait for commands, so we can throttle sender
-			cmd := <-e.cmdChan
-			if !closed(e.cmdChan) {
-				cont = e.handleCmd(cmd)
-			} else {
-				cont = false
-			}
+		v := e.Chan.Recv()
+		e.bindLock.Lock()
+		if !e.Chan.Closed() {
+			e.dispatcher.Dispatch(v, e.bindings)
 		} else {
-			// there are recvers, handle both cmd and data input,
-			// and give cmdChan higher priority
-			select {
-			case cmd := <-e.cmdChan:
-				if !closed(e.cmdChan) {
-					cont = e.handleCmd(cmd)
-				} else {
-					cont = false
-				}
-			default:
-				select {
-				case cmd := <-e.cmdChan:
-					if !closed(e.cmdChan) {
-						cont = e.handleCmd(cmd)
-					} else {
-						cont = false
-					}
-				case v := <-e.Chan:
-					if !closed(e.Chan) {
-						e.dispatcher.Dispatch(v, e.bindings)
-						//kludge for issue#536
-						count++
-						if count > DefCountBeforeGC {
-							count = 0
-							//make this nonblocking since it is fine as long as something inside cmdChan
-							_ = e.cmdChan <- &command{kind:GC}
-						}
-					} else {
-						e.detachAllRecvChans()
-						e.cleanup()
-						cont = false
-					}
-				}
-			}
+			e.detachAllRecvChans()
+			cont = false
 		}
+		e.bindLock.Unlock()
 	}
 }
-
-func (e *Endpoint) cleanup() {}
 
 func (e *Endpoint) detachAllRecvChans() {
 	for i, r := range e.bindings {
@@ -149,7 +76,8 @@ func (e *Endpoint) detachAllRecvChans() {
 	e.bindings = e.bindings[0:0]
 }
 
-func (e *Endpoint) attachImpl(p *Endpoint, done chan *command) {
+func (e *Endpoint) attach(p *Endpoint) {
+	e.bindLock.Lock()
 	len0 := len(e.bindings)
 	if len0 == cap(e.bindings) {
 		//expand
@@ -159,24 +87,18 @@ func (e *Endpoint) attachImpl(p *Endpoint, done chan *command) {
 	}
 	e.bindings = e.bindings[0 : len0+1]
 	e.bindings[len0] = p
+	e.bindLock.Unlock()
 	if e.bindChan != nil {
 		//KeepLatest non-blocking send
 		for !(e.bindChan <- &BindEvent{PeerAttach, len0 + 1}) { //chan full
 			<-e.bindChan //drop the oldest one
 		}
 	}
-	done <- nil
 }
 
-func (e *Endpoint) attach(p *Endpoint, done chan *command) {
-	cmd := &command{}
-	cmd.kind = attach
-	cmd.data = p
-	cmd.rspChan = done
-	e.cmdChan <- cmd
-}
-
-func (e *Endpoint) detachImpl(p *Endpoint) {
+func (e *Endpoint) detach(p *Endpoint) {
+	e.bindLock.Lock()
+	defer e.bindLock.Unlock()
 	n := len(e.bindings)
 	for i, v := range e.bindings {
 		if v == p {
@@ -191,19 +113,26 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 			}
 			if e.kind == recverType {
 				//for recver, if all senders detached
-				//send chanCloseMsg to notify possible pending goroutine
+				//send EndOfData to notify possible pending goroutine
 				if len(e.bindings) == 0 {
-					e.Chan <- chanCloseMsg{}
+					if e.bindChan != nil {
+						//if bindChan exist, user is monitoring bind status
+						//send EndOfData event and normally leave ext chan "ch" open
+						//only close it when flag is set
+						for !(e.bindChan <- &BindEvent{EndOfData, 0}) {
+							<-e.bindChan
+						}
+						if e.flag {
+							e.Chan.Close()
+						}
+					} else {
+						//since no bindChan, user code is not monitoring bind status
+						//close ext chan to notify potential pending goroutine
+						e.Chan.Close()
+					}
 				}
 			}
 			return
 		}
 	}
-}
-
-func (e *Endpoint) detach(p *Endpoint) {
-	cmd := &command{}
-	cmd.kind = detach
-	cmd.data = p
-	e.cmdChan <- cmd
 }
