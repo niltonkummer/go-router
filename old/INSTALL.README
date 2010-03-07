@@ -1,0 +1,7 @@
+1. install Go (http://golang.org/doc/install.html) 
+2. download "router" (http://code.google.com/p/go-router/ or http://channel.sourceforge.net)
+3. cd top directory of router; make
+4. run samples: test1, pingpong, chat, dummyserver.
+
+5. Go website: http://golang.org
+6. "router" website: http://code.google.com/p/go-router/
