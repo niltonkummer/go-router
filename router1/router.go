@@ -93,7 +93,7 @@ const (
 	addProxy
 	delProxy
 	shutdown
-	GC         //kludge for issue #536
+	GC //kludge for issue #536
 )
 
 type command struct {
@@ -205,7 +205,7 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 	return
 }
 
-func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
+func validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
 	ok := false
 	ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
@@ -236,7 +236,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
+	ch, err1 := validateChan(v)
 	if err1 != nil {
 		s.LogError(err1)
 		s.Raise(err1)
@@ -305,7 +305,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
+	ch, err1 := validateChan(v)
 	if err1 != nil {
 		s.LogError(err1)
 		s.Raise(err1)
@@ -397,7 +397,7 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	cv, err1 := s.validateChan(v)
+	cv, err1 := validateChan(v)
 	if err1 != nil {
 		s.LogError(err1)
 		s.Raise(err1)

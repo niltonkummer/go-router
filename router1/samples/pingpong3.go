@@ -86,7 +86,7 @@ func newPonger(rot router.Router, done chan<- bool) {
 func main() {
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Println("Usage: pingpong2 num_runs")
+		fmt.Println("Usage: pingpong3 num_runs")
 		return
 	}
 	numRuns, _ := strconv.Atoi(flag.Arg(0))

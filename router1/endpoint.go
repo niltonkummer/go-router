@@ -126,7 +126,7 @@ func (e *Endpoint) senderLoop() {
 						if count > DefCountBeforeGC {
 							count = 0
 							//make this nonblocking since it is fine as long as something inside cmdChan
-							_ = e.cmdChan <- &command{kind:GC}
+							_ = e.cmdChan <- &command{kind: GC}
 						}
 					} else {
 						e.detachAllRecvChans()

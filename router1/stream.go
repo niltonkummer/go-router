@@ -55,7 +55,7 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	return s
 }
 
-func (s *stream) Start() {
+func (s *stream) start() {
 	go s.outputMainLoop()
 	go s.inputMainLoop()
 }
@@ -118,7 +118,7 @@ func (s *stream) outputMainLoop() {
 	//kludge for issue#536, merge data streams into one chan
 	go func() {
 		for {
-			m := <- s.importConnChan
+			m := <-s.importConnChan
 			if closed(s.importConnChan) {
 				break
 			}
@@ -127,7 +127,7 @@ func (s *stream) outputMainLoop() {
 	}()
 	go func() {
 		for {
-			m := <- s.importPubSubChan
+			m := <-s.importPubSubChan
 			if closed(s.importPubSubChan) {
 				break
 			}
