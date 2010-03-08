@@ -20,23 +20,23 @@ test setup:
       machine: Pentium(R) Dual CPU E2160 @ 1.80GHz with 2G RAM
       GOMAXPROCS=32
 
-. ping-pong using direct channels between Pinger and Ponger:
+. pingpong1: using direct channels between Pinger and Ponger:
 real	0m7.724s
 user	0m2.280s
 sys	0m1.032s
 
-. Pinger/Ponger using channels connected thru one router:
+. pingpong2: Pinger/Ponger using channels connected thru one router:
 real	0m7.641s
 user	0m3.436s
 sys	0m2.348s
 
-. Pinger's channels connected to router1 and Ponger's channels connected to
+. pingpong3: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are directly connected:
 real	0m11.497s
 user	0m6.540s
 sys	0m4.628s
 
-. Pinger's channels connected to router1 and Ponger's channels connected to
+. pingpong4: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are connected thru unix socket:
 real	0m26.834s
 user	0m17.841s
@@ -57,23 +57,23 @@ trunk/router2:
 "ping-pong" tests: 
 same setup as above
 
-. ping-pong using direct channels between Pinger and Ponger:
+. pingpong1: using direct channels between Pinger and Ponger:
 real	0m7.698s
 user	0m2.136s
 sys	0m1.100s
 
-. Pinger/Ponger using channels connected thru one router:
+. pingpong2: Pinger/Ponger using channels connected thru one router:
 real	0m7.674s
 user	0m2.664s
 sys	0m1.472s
 
-. Pinger's channels connected to router1 and Ponger's channels connected to
+. pingpong3: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are directly connected:
 real	0m8.540s
 user	0m5.992s
 sys	0m2.312s
 
-. Pinger's channels connected to router1 and Ponger's channels connected to
+. pingpong4: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are connected thru unix socket:
 real	0m19.224s
 user	0m13.073s
