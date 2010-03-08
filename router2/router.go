@@ -492,8 +492,12 @@ func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
 
 	s.tblLock.Unlock()
 
-	//remove bindings from peers
-	for _, v := range endp1.bindings {
+	//remove bindings from peers. dup bindings to avoid race at shutdown
+	endp1.bindLock.Lock()
+	copySet := make([]*Endpoint, len(endp1.bindings))
+	copy(copySet, endp1.bindings)
+	endp1.bindLock.Unlock()
+	for _, v := range copySet {
 		if endp1.kind == senderType {
 			s.Log(LOG_INFO, fmt.Sprintf("del bindings: %v -> %v", endp1.Id, v.Id))
 		} else {

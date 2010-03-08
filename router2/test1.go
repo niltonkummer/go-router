@@ -11,6 +11,7 @@ import (
 	"router"
 	"strings"
 	"net"
+	"time"
 )
 
 func test_IntId() {
@@ -228,7 +229,7 @@ func test_local_conn() {
 	rout1.Connect(rout2)
 	chi1 := make(chan string)
 	chi2 := make(chan string)
-	chi3 := make(chan string, 8)
+	chi3 := make(chan string)
 	chiN := make(chan *router.IdChanInfoMsg)
 	cho := make(chan string)
 	done := make(chan bool)
@@ -248,8 +249,11 @@ func test_local_conn() {
 	}
 	go func() {
 		cho <- "hello1"
+		time.Sleep(1e6)   //add some timeout to allow router2/sink3 DetachChan to take effect
 		cho <- "hello2"
+		time.Sleep(1e6)
 		cho <- "hello3"
+		time.Sleep(1e6)
 		cho <- "from router1/src"
 		close(cho)
 	}()
@@ -271,7 +275,7 @@ func test_local_conn() {
 			fmt.Println("router2/sink3 got: ", v)
 			i++
 			if i == 2 {
-				rout2.DetachChan(router.IntID(10), chi3)
+				go rout2.DetachChan(router.IntID(10), chi3)
 			}
 		}
 		done <- true
@@ -407,9 +411,13 @@ func test_remote_conn() {
 			}
 			go func() {
 				cho <- "hello1"
+				time.Sleep(1e6)   //add some timeout to allow router2/sink3 DetachChan to take effect
 				cho <- "hello2"
+				time.Sleep(1e6)   
 				cho <- "hello3"
+				time.Sleep(1e6)   
 				cho <- "hello4"
+				time.Sleep(1e6)   
 				cho <- "from router1/src"
 				close(cho)
 			}()
@@ -443,7 +451,7 @@ func test_remote_conn() {
 			fmt.Println(err)
 		} else {
 			chi2 := make(chan string)
-			chi3 := make(chan string, 8)
+			chi3 := make(chan string)
 			done := make(chan bool)
 			rout2.AttachRecvChan(router.IntID(10), chi2)
 			rout2.AttachRecvChan(router.IntID(10), chi3)
@@ -459,7 +467,7 @@ func test_remote_conn() {
 					fmt.Println("router2/sink3 got: ", v)
 					i++
 					if i == 2 {
-						rout2.DetachChan(router.IntID(10), chi3)
+						go rout2.DetachChan(router.IntID(10), chi3)
 					}
 				}
 				done <- true

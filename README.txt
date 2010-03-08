@@ -3,7 +3,7 @@ There are two implementations of "router" package; both provide the same user AP
 trunk/router1:
 . strictly follow Go's idea of "Do not communicate by sharing memory; 
            instead, share memory by communicating."
-. avoid sharing data among goroutines (thus avoid locks/mutex); 
+. avoid directly sharing memory among goroutines (thus avoid locks/mutex); 
   each data has a owner and can only be changed by owner; 
   others have to talk to owners thru channels to access the data
 . although heavily depending on channel message passing, the implementation is
@@ -44,12 +44,15 @@ sys	0m8.701s
 
 
 trunk/router2:
-. directly share data among various goroutines for better efficiency, shared
-  data are protected by sync.Mutex
+. directly share memory among various goroutines for better efficiency, shared
+  memory are protected by sync.Mutex
 . router's routing-table, endpoint's binding_set, and proxy's RecvChanBundle and
   SendChanBundle are directly shared and locked.
 . avoid Go issue #536.
-. router2 is a bit more efficient than router1.
+  however another issue is introduced: in "recver" goroutine, if channel buffer size is 0
+  and it goes back to router to change subscriptions, 
+  it has to do it async: ie. calling "go ..." to run it in a new goroutine
+. trunk/router2 is a bit more efficient than trunk/router1.
 
 "ping-pong" tests: 
 same setup as above
