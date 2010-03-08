@@ -49,8 +49,8 @@ trunk/router2:
 . router's routing-table, endpoint's binding_set, and proxy's RecvChanBundle and
   SendChanBundle are directly shared and locked.
 . avoid Go issue #536.
-  however another issue is introduced: in "recver" goroutine, if channel buffer size is 0
-  and it goes back to router to change subscriptions, 
+  however another issue is introduced: in "recver" goroutine, if it goes back 
+  to router to invoke AttachChan/DetachChan, there could be deadlock.
   it has to do it async: ie. calling "go ..." to run it in a new goroutine
 . trunk/router2 is a bit more efficient than trunk/router1.
 
