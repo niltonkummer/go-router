@@ -7,11 +7,11 @@ include $(GOROOT)/src/Make.$(GOARCH)
 VERSION=router1
 
 # build executables
-all: test1 chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 client server
+all: test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 client server
 
-test1: package
-	$(GC) -I../$(VERSION)/_obj test1.go
-	$(LD) -L../$(VERSION)/_obj -o $@ test1.$O
+test: package
+	$(GC) -I../$(VERSION)/_obj test.go
+	$(LD) -L../$(VERSION)/_obj -o $@ test.$O
 	@echo "Done. Executable is: $@"
 
 chatcli: package
