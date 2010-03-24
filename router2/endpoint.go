@@ -9,6 +9,7 @@ package router
 import (
 	"reflect"
 	"sync"
+	"container/vector"
 )
 
 type endpointType int
@@ -18,6 +19,18 @@ const (
 	recverType
 )
 
+type operType int
+
+const (
+	attachOp operType = iota
+	detachOp
+)
+
+type oper struct {
+	kind operType
+	peer *Endpoint
+}
+
 type Endpoint struct {
 	kind       endpointType
 	Id         Id
@@ -26,6 +39,8 @@ type Endpoint struct {
 	bindChan   chan *BindEvent
 	bindLock   sync.Mutex
 	bindings   []*Endpoint //binding_set
+	inDisp     bool        //in a dispatch loop
+	opBuf      *vector.Vector
 	flag       bool        //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 }
 
@@ -57,14 +72,37 @@ func (e *Endpoint) senderLoop() {
 	cont := true
 	for cont {
 		v := e.Chan.Recv()
-		e.bindLock.Lock()
 		if !e.Chan.Closed() {
+			e.bindLock.Lock()
+			e.inDisp = true
+			e.bindLock.Unlock()
 			e.dispatcher.Dispatch(v, e.bindings)
+			e.bindLock.Lock()
+			e.inDisp = false
+			opBuf := e.opBuf
+			e.opBuf = nil
+			e.bindLock.Unlock()
+			if opBuf != nil {
+				e.runPendingOps(opBuf)
+			}
 		} else {
+			e.bindLock.Lock()
 			e.detachAllRecvChans()
+			e.bindLock.Unlock()
 			cont = false
 		}
-		e.bindLock.Unlock()
+	}
+}
+
+func (e *Endpoint) runPendingOps(opBuf *vector.Vector) {
+	for i:=0; i<opBuf.Len(); i++ {
+		op := opBuf.At(i).(oper)
+		switch op.kind {
+		case attachOp:
+			e.attach(op.peer)
+		case detachOp:
+			e.detach(op.peer)
+		}
 	}
 }
 
@@ -78,6 +116,14 @@ func (e *Endpoint) detachAllRecvChans() {
 
 func (e *Endpoint) attach(p *Endpoint) {
 	e.bindLock.Lock()
+	if e.inDisp {
+		if e.opBuf == nil {
+			e.opBuf = new(vector.Vector)
+		}
+		e.opBuf.Push(oper{attachOp, p})
+		e.bindLock.Unlock()
+		return
+	}
 	len0 := len(e.bindings)
 	if len0 == cap(e.bindings) {
 		//expand
@@ -98,6 +144,14 @@ func (e *Endpoint) attach(p *Endpoint) {
 
 func (e *Endpoint) detach(p *Endpoint) {
 	e.bindLock.Lock()
+	if e.inDisp {
+		if e.opBuf == nil {
+			e.opBuf = new(vector.Vector)
+		}
+		e.opBuf.Push(oper{detachOp, p})
+		e.bindLock.Unlock()
+		return
+	}
 	defer e.bindLock.Unlock()
 	n := len(e.bindings)
 	for i, v := range e.bindings {
