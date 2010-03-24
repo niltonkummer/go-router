@@ -41,7 +41,7 @@ type Endpoint struct {
 	bindings   []*Endpoint //binding_set
 	inDisp     bool        //in a dispatch loop
 	opBuf      *vector.Vector
-	flag       bool        //a flag to mark if we close ext chan when EndOfData even if bindChan exist
+	flag       bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 }
 
 func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue, bc chan *BindEvent) *Endpoint {
@@ -95,7 +95,7 @@ func (e *Endpoint) senderLoop() {
 }
 
 func (e *Endpoint) runPendingOps(opBuf *vector.Vector) {
-	for i:=0; i<opBuf.Len(); i++ {
+	for i := 0; i < opBuf.Len(); i++ {
 		op := opBuf.At(i).(oper)
 		switch op.kind {
 		case attachOp:
