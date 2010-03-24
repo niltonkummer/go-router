@@ -16,7 +16,7 @@ import (
 //Membership identifies whether communicating peers (send chans and recv chans) are from the same router or diff routers
 const (
 	MemberLocal  = iota //peers (send chans and recv chans) are from the same router
-	MemberRemote //peers (send chans and recv chans) are from diff routers
+	MemberRemote        //peers (send chans and recv chans) are from diff routers
 	NumMembership
 )
 
@@ -34,8 +34,8 @@ func MemberString(m int) string {
 //Scope is the scope to publish/subscribe (or send/recv) msgs
 const (
 	ScopeGlobal = iota // send to or recv from both local and remote peers
-	ScopeRemote // send to or recv from remote peers
-	ScopeLocal  // send to or recv from local peers
+	ScopeRemote        // send to or recv from remote peers
+	ScopeLocal         // send to or recv from local peers
 	NumScope
 )
 
