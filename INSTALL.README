@@ -8,9 +8,9 @@ There are two ways to install them and try out:
    . run "goinstall go-router.googlecode.com/svn/trunk/router1" to install "router1" implementation
    . run "goinstall go-router.googlecode.com/svn/trunk/router2" to install "router2" implementation
    . in code, add the following import:
-        . import (router "go-router.googlecode.com/svn/trunk/router1") to use "router1" implementation
+        . import ("go-router.googlecode.com/svn/trunk/router1") to use "router1" implementation
           see samples/test_router1.go
-        . import (router "go-router.googlecode.com/svn/trunk/router2") to use "router2" implementation
+        . import ("go-router.googlecode.com/svn/trunk/router2") to use "router2" implementation
           see samples/test_router2.go
 
 2. download or "svn co" from project website: http://code.google.com/p/go-router
