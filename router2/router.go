@@ -197,10 +197,10 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	ch, err := s.validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
@@ -233,8 +233,8 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	endp := newEndpoint(id, senderType, ch, bindChan)
 	err = s.attach(endp)
 	if err != nil {
-		s.Raise(err)
 		s.LogError(err)
+		s.Raise(err)
 	}
 	return
 }
@@ -245,10 +245,10 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	ch, err := s.validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
@@ -299,10 +299,10 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	cv, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	cv, err := s.validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	endp := &Endpoint{}
