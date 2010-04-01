@@ -172,7 +172,7 @@ func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop exit")
 }
 
-//read data from io.Reader and pass them to exportConnChan/exportPubSubChan/exportAppDataChan
+//read data from io.Reader, pass ctrlMsg to exportCtrlChan and dataMsg to peer
 func (s *stream) inputMainLoop() {
 	s.Log(LOG_INFO, "inputMainLoop start")
 	cont := true
