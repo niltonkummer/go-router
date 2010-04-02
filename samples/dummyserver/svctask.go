@@ -196,8 +196,8 @@ func (at *ServiceTask) handleSvcReq(req string) {
 	at.numTrans++
 	//fake random fault report
 	if at.numTrans > 3 {
-		r = at.random.Intn(6)
-		if r == 5 {
+		r = at.random.Intn(128)
+		if r == 99 {
 			at.Raise(os.ErrorString("app service got an error"))
 		}
 	}
