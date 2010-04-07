@@ -115,50 +115,35 @@ func (s *stream) send(m *genericMsg, appMsg bool) (err os.Error) {
 //read data from importConnChan/importPubSubChan/importAppDataChan and send them to io.Writer
 func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop start")
-	//kludge for issue#536, merge data streams into one chan
-	go func() {
-		for {
-			m := <-s.importConnChan
-			if closed(s.importConnChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
-	go func() {
-		for {
-			m := <-s.importPubSubChan
-			if closed(s.importPubSubChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
 	//
 	proxyDisconn := false
 	cont := true
-	count := 0
 	for cont {
 		select {
 		case cmd := <-s.myCmdChan:
 			if cmd == peerClose {
 				cont = false
 			}
-		case m := <-s.importAppDataChan:
-			if !closed(s.importAppDataChan) {
-				if err := s.send(m, true); err != nil {
+		case m := <-s.importConnChan:
+			if !closed(s.importConnChan) {
+				if err := s.send(m, false); err != nil {
 					cont = false
 				}
 				if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) {
 					proxyDisconn = true
 					cont = false
 				}
-				//kludge for issue#536
-				count++
-				if count > DefCountBeforeGC {
-					count = 0
-					//make this nonblocking since it is fine as long as something inside cmdChan
-					_ = s.myCmdChan <- peerGC
+			}
+		case m := <-s.importPubSubChan:
+			if !closed(s.importPubSubChan) {
+				if err := s.send(m, false); err != nil {
+					cont = false
+				}
+			}
+		case m := <-s.importAppDataChan:
+			if !closed(s.importAppDataChan) {
+				if err := s.send(m, true); err != nil {
+					cont = false
 				}
 			}
 		}

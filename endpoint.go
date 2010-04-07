@@ -90,7 +90,6 @@ func (e *Endpoint) recverLoop() {
 
 func (e *Endpoint) senderLoop() {
 	cont := true
-	count := 0
 	for cont {
 		if len(e.bindings) == 0 {
 			// no recver, only wait for commands, so we can throttle sender
@@ -121,13 +120,6 @@ func (e *Endpoint) senderLoop() {
 				case v := <-e.Chan:
 					if !closed(e.Chan) {
 						e.dispatcher.Dispatch(v, e.bindings)
-						//kludge for issue#536
-						count++
-						if count > DefCountBeforeGC {
-							count = 0
-							//make this nonblocking since it is fine as long as something inside cmdChan
-							_ = e.cmdChan <- &command{kind: GC}
-						}
 					} else {
 						e.detachAllRecvChans()
 						e.cleanup()

@@ -39,7 +39,6 @@ const (
 	DefDataChanBufSize = 32
 	DefCmdChanBufSize  = 64
 	DefBindingSetSize  = 8
-	DefCountBeforeGC   = 16
 )
 
 //Router is the main access point to functionality. Applications will create an instance
@@ -93,7 +92,6 @@ const (
 	addProxy
 	delProxy
 	shutdown
-	GC //kludge for issue #536
 )
 
 type command struct {
