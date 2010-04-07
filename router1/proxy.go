@@ -36,7 +36,6 @@ const (
 	peerStart peerCommand = iota
 	peerPause
 	peerClose
-	peerGC
 )
 
 //common interface for all connection peers (Proxy, Stream) which should embed this
