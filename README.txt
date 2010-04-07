@@ -8,11 +8,6 @@ trunk/router1:
   others have to talk to owners thru channels to access the data
 . although heavily depending on channel message passing, the implementation is
   reasonably efficient (goroutines/channels are fast), see the test data.
-. there is one issue resulted from Go issue #536. 
-  If a "select" waits on several channel recv/send operations, and
-  msg flow rates are substantially different in diff channels, memory usage
-  could climb up quickly. Currently add a kludge for this by sending dummy
-  "GC" msgs to slow channels periodically.
 
 "ping-pong" tests:
 (bouncing 100K msgs between "Pinger" goroutine and "Ponger" goroutine)
@@ -48,7 +43,6 @@ trunk/router2:
   memory are protected by sync.Mutex
 . router's routing-table, endpoint's binding_set, and proxy's RecvChanBundle and
   SendChanBundle are directly shared and locked.
-. avoid Go issue #536.
 . trunk/router2 is a bit more efficient than trunk/router1.
 
 "ping-pong" tests: 
