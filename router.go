@@ -204,8 +204,7 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 }
 
 func validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
-	ok := false
-	ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errInvalidChan)
 		return
@@ -217,7 +216,7 @@ func validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
 	case *reflect.FloatType:
 	case *reflect.StringType:
 	case *reflect.PtrType:
-		if _, ok1 := et.Elem().(*reflect.StructType); !ok1 {
+		if _, ok = et.Elem().(*reflect.StructType); !ok {
 			err = os.ErrorString(errInvalidChan)
 			return
 		}
@@ -277,8 +276,8 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	cmd = <-cmd.rspChan //wait for response from router
 	if cmd.error != nil {
 		err = cmd.error
-		s.Raise(err)
 		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	//now we are attached successfully, start forwarding
@@ -360,7 +359,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		for cont {
 			v := <-endp.Chan
 			if !closed(endp.Chan) {
-				if _, ok1 := v.(chanCloseMsg); ok1 {
+				if _, ok = v.(chanCloseMsg); ok {
 					if endp.bindChan != nil {
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
@@ -529,7 +528,6 @@ func (s *routerImpl) attach(cmd *command) {
 				if scope_match(sender.Id, endp.Id) {
 					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
 					if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-						//s.LogError("enable for ", sender.Id);
 						s.notifier.setFlag(sender.Id, idx, true)
 					}
 					matches.Push(sender)
