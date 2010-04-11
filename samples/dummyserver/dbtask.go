@@ -149,7 +149,7 @@ func (dt *DbTask) handleDbReq(req *DbReq) {
 			dt.numTrans++
 			//fake random fault report
 			if dt.numTrans > 3 {
-				r := dt.random.Intn(128)
+				r := dt.random.Intn(1024)
 				if r == 31 {
 					fmt.Println("DbTask at [", dt.servName, "] report fault")
 					dt.Raise(os.ErrorString("DbTask got an error"))

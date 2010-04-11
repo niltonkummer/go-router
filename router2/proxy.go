@@ -37,7 +37,7 @@ type peerIntf interface {
 }
 
 type proxyImpl struct {
-	//chan for ctrl msgs from peers during connSetup
+	//chan for ctrl msgs from peers
 	ctrlChan chan *genericMsg
 	//use peerIntf to forward app/ctrl msgs to peer (proxy or stream)
 	peer peerIntf
@@ -258,8 +258,6 @@ func (p *proxyImpl) ctrlMainLoop() {
 	cont := true
 	for cont {
 		p.Log(LOG_INFO, "proxy wait for another sys ctrl msg")
-		//give conn msgs, pubSub msgs higher priority by duplicating them twice
-		//put app data chan at very last
 		select {
 		case m := <-p.sysChans.pubSubInfo:
 			if closed(p.sysChans.pubSubInfo) {

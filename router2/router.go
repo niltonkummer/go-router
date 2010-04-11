@@ -40,7 +40,6 @@ const (
 	DefDataChanBufSize = 32
 	DefCmdChanBufSize  = 64
 	DefBindingSetSize  = 8
-	DefCountBeforeGC   = 16
 )
 
 //Router is the main access point to functionality. Applications will create an instance
@@ -167,8 +166,7 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 }
 
 func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
-	ok := false
-	ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errInvalidChan)
 		return
@@ -180,7 +178,7 @@ func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.
 	case *reflect.FloatType:
 	case *reflect.StringType:
 	case *reflect.PtrType:
-		if _, ok1 := et.Elem().(*reflect.StructType); !ok1 {
+		if _, ok = et.Elem().(*reflect.StructType); !ok {
 			err = os.ErrorString(errInvalidChan)
 			return
 		}
@@ -348,7 +346,7 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 	//check for duplicate
 	switch endp.kind {
 	case senderType:
-		if _, ok := ent.senders[endp.Chan.Interface()]; ok {
+		if _, ok = ent.senders[endp.Chan.Interface()]; ok {
 			err = os.ErrorString(errDupAttachment)
 			s.LogError(err)
 			s.tblLock.Unlock()
@@ -357,7 +355,7 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 			ent.senders[endp.Chan.Interface()] = endp
 		}
 	case recverType:
-		if _, ok := ent.recvers[endp.Chan.Interface()]; ok {
+		if _, ok = ent.recvers[endp.Chan.Interface()]; ok {
 			err = os.ErrorString(errDupAttachment)
 			s.LogError(err)
 			s.tblLock.Unlock()
@@ -385,7 +383,6 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 				if scope_match(sender.Id, endp.Id) {
 					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
 					if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-						//s.LogError("enable for ", sender.Id);
 						s.notifier.setFlag(sender.Id, idx, true)
 					}
 					matches.Push(sender)
@@ -408,7 +405,6 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 						for _, sender := range ent2.senders {
 							if scope_match(sender.Id, endp.Id) {
 								if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-									//s.LogError("enable for ", sender.Id);
 									s.notifier.setFlag(sender.Id, idx, true)
 								}
 								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
@@ -538,8 +534,8 @@ func (s *routerImpl) shutdown() {
 	s.Log(LOG_INFO, "all proxy closed")
 
 	//close all enndpoint send chans
-	for _, ent2 := range s.routingTable {
-		for _, sender := range ent2.senders {
+	for _, ent := range s.routingTable {
+		for _, sender := range ent.senders {
 			sender.Close()
 		}
 	}
@@ -549,8 +545,8 @@ func (s *routerImpl) shutdown() {
 	s.Logger.Close()
 	s.LogSink.Close()
 
-	for _, ent2 := range s.routingTable {
-		for _, recver := range ent2.recvers {
+	for _, ent := range s.routingTable {
+		for _, recver := range ent.recvers {
 			recver.Close()
 		}
 	}
