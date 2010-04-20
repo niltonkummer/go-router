@@ -15,8 +15,8 @@ import (
 )
 
 type stream struct {
-	//use peerIntf.sendAppMsg() to forward app msgs to peer(proxy)
 	peer peerIntf
+	outputChan chan *genericMsg
 	//
 	rwc        io.ReadWriteCloser
 	mar        Marshaler
@@ -34,6 +34,7 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	s := new(stream)
 	s.proxy = p
 	//
+	s.outputChan = make(chan *genericMsg, s.proxy.router.defChanBufSize + DefCmdChanBufSize)
 	s.rwc = rwc
 	s.mar = mp.NewMarshaler(rwc)
 	s.demar = mp.NewDemarshaler(rwc)
@@ -53,6 +54,7 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 }
 
 func (s *stream) start() {
+	go s.outputMainLoop()
 	go s.inputMainLoop()
 }
 
@@ -65,6 +67,8 @@ func (s *stream) closeImpl() {
 	if !s.Closed {
 		s.Log(LOG_INFO, "closeImpl called")
 		s.Closed = true
+		//shutdown outputMainLoop
+		close(s.outputChan) 
 		//shutdown inputMainLoop
 		s.rwc.Close()
 		//close logger
@@ -73,52 +77,71 @@ func (s *stream) closeImpl() {
 	}
 }
 
-func (s *stream) sendAppMsg(id Id, data interface{}) (err os.Error) {
-	_, ok := data.(chanCloseMsg)
-	if ok {
-		id, _ = id.Clone(NumScope, NumMembership) //special id to mark chan close
+func (s *stream) appMsgChanForId(id Id) (reflectChanValue, int) {
+	if s.proxy.translator != nil {
+		return &genericMsgChan{id, s.outputChan, func(id Id) Id { return s.proxy.translator.TranslateOutward(id) }, true}, 1
 	}
-	s.Lock()
-	defer s.Unlock()
-	if err = s.mar.Marshal(id); err != nil {
-		s.LogError(err)
-		//s.Raise(err)
-		return
-	}
-	if !ok {
-		if err = s.mar.Marshal(data); err != nil {
-			s.LogError(err)
-			//s.Raise(err)
-			return
-		}
-	}
-	return
+	return &genericMsgChan{id, s.outputChan, nil, true}, 1
 }
 
 //send ctrl data to io.Writer
-func (s *stream) sendCtrlMsg(id Id, data interface{}) (err os.Error) {
+func (s *stream) sendCtrlMsg(m *genericMsg) (err os.Error) {
 	s.Lock()
-	if err = s.mar.Marshal(id); err != nil {
+	if err = s.mar.Marshal(m.Id); err != nil {
 		s.LogError(err)
 		//s.Raise(err)
 	} else {
-		if err = s.mar.Marshal(data); err != nil {
+		if err = s.mar.Marshal(m.Data); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 		}
 	}
 	s.Unlock()
-	s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", id))
+	s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", m.Id))
 	if err != nil {
 		//must be io conn fail or marshal fail
 		//notify proxy disconn
-		s.peer.sendCtrlMsg(s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{})
+		s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
 	}
-	if id.Match(s.proxy.router.SysID(RouterDisconnId)) || err != nil {
+	if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) || err != nil {
 		s.closeImpl()
 		s.Log(LOG_INFO, "stream exit at output")
 	}
 	return
+}
+
+func (s *stream) outputMainLoop() {
+	s.Log(LOG_INFO, "outputMainLoop start")
+	//
+	var err os.Error
+	cont := true
+	for cont {
+		m := <-s.outputChan
+		if closed(s.outputChan) {
+			cont = false
+		} else {
+			s.Lock()
+			if err = s.mar.Marshal(m.Id); err != nil {
+				s.LogError(err)
+				//s.Raise(err)
+				cont = false
+			} else if !(m.Id.Scope() == NumScope && m.Id.Member() == NumMembership) {
+				if err = s.mar.Marshal(m.Data); err != nil {
+					s.LogError(err)
+					//s.Raise(err)
+					cont = false
+				}
+			}
+			s.Unlock()
+		}
+	}
+	if err != nil {
+		//must be io conn fail or marshal fail
+		//notify proxy disconn
+		s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
+	}
+	s.closeImpl()
+	s.Log(LOG_INFO, "outputMainLoop exit")
 }
 
 //read data from io.Reader, pass ctrlMsg to exportCtrlChan and dataMsg to peer
@@ -132,7 +155,7 @@ func (s *stream) inputMainLoop() {
 	}
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
-	s.peer.sendCtrlMsg(s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{})
+	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
 	//s.closeImpl() only called from outputMainLoop
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
@@ -160,7 +183,7 @@ func (s *stream) recv() (err os.Error) {
 			//s.Raise(err)
 			return
 		}
-		s.peer.sendCtrlMsg(id, cim)
+		s.peer.sendCtrlMsg(&genericMsg{id, cim})
 	case id.Match(r.SysID(PubId)):
 		fallthrough
 	case id.Match(r.SysID(UnPubId)):
@@ -175,10 +198,14 @@ func (s *stream) recv() (err os.Error) {
 			//s.Raise(err)
 			return
 		}
-		s.peer.sendCtrlMsg(id, icm)
+		s.peer.sendCtrlMsg(&genericMsg{id, icm})
 	default: //appMsg
 		if id.Scope() == NumScope && id.Member() == NumMembership { //chan is closed
-			s.peer.sendAppMsg(id, chanCloseMsg{})
+			peerChan, _ := s.peer.appMsgChanForId(id)
+			if peerChan != nil {
+				peerChan.Close()
+				s.Log(LOG_INFO, fmt.Sprintf("close proxy forwarding chan for %v", id))
+			}
 		} else {
 			chanType := s.proxy.getExportRecvChanType(id)
 			if chanType == nil {
@@ -199,7 +226,11 @@ func (s *stream) recv() (err os.Error) {
 				//s.Raise(err)
 				return
 			}
-			s.peer.sendAppMsg(id, val.Interface())
+			peerChan, num := s.peer.appMsgChanForId(id)
+			if peerChan != nil && num > 0 {
+				peerChan.Send(val)
+				s.Log(LOG_INFO, fmt.Sprintf("send appMsg for %v", id))
+			}
 		}
 	}
 	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))

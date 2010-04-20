@@ -12,7 +12,7 @@ import (
 
 type notifyChansPerScope struct {
 	chans [4]chan *IdChanInfoMsg
-	flags [4]bool
+	endps [4]*Endpoint
 }
 
 func (n *notifyChansPerScope) Close(scope int, member int, r *routerImpl) {
@@ -28,7 +28,7 @@ func newNotifyChansPerScope(scope int, member int, r *routerImpl) *notifyChansPe
 	nc := new(notifyChansPerScope)
 	for i := 0; i < 4; i++ {
 		nc.chans[i] = make(chan *IdChanInfoMsg, r.defChanBufSize)
-		r.AttachSendChan(r.NewSysID(PubId+i, scope, member), nc.chans[i])
+		nc.endps[i], _ = r.AttachSendChan(r.NewSysID(PubId+i, scope, member), nc.chans[i])
 	}
 	return nc
 }
@@ -53,50 +53,46 @@ func (n *notifier) Close() {
 	}
 }
 
-//the following are only called by router mainLoop, mostly in another goroutine
-//all flags (notifChansAttached, notifChans.flags[] are accessed from router mainLoop goroutine,
-//there should be no memory consistency issue ??sure? should switch to using a separate goroutine for notifier?
-
-func (n *notifier) setFlag(id Id, sysIdx int, flag bool) {
-	n.notifyChans[id.Scope()].flags[sysIdx-PubId] = flag
-}
-
 func (n notifier) notifyPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyPub: %v", info.Id))
-	if n.notifyChans[info.Id.Scope()].flags[0] {
-		ok := n.notifyChans[info.Id.Scope()].chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
+	nc := n.notifyChans[info.Id.Scope()]
+	if nc.endps[0].NumBindings() > 0 {
+		ok := nc.chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { nc.chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
 
 func (n notifier) notifyUnPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyUnPub: %v", info.Id))
-	if n.notifyChans[info.Id.Scope()].flags[1] {
-		ok := n.notifyChans[info.Id.Scope()].chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
+	nc := n.notifyChans[info.Id.Scope()]
+	if nc.endps[1].NumBindings() > 0 {
+		ok := nc.chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { nc.chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
 
 func (n notifier) notifySub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
-	if n.notifyChans[info.Id.Scope()].flags[2] {
-		ok := n.notifyChans[info.Id.Scope()].chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
+	nc := n.notifyChans[info.Id.Scope()]
+	if nc.endps[2].NumBindings() > 0 {
+		ok := nc.chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { nc.chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }
 
 func (n notifier) notifyUnSub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
-	if n.notifyChans[info.Id.Scope()].flags[3] {
-		ok := n.notifyChans[info.Id.Scope()].chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
+	nc := n.notifyChans[info.Id.Scope()]
+	if nc.endps[3].NumBindings() > 0 {
+		ok := nc.chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
-			go func() { n.notifyChans[info.Id.Scope()].chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
+			go func() { nc.chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
 		}
 	}
 }

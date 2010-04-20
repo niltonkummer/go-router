@@ -27,7 +27,7 @@ type Pinger struct {
 
 func (p *Pinger) Run() {
 	for v := range p.pongChan {
-		fmt.Println("Pinger recv: ", v)
+		//fmt.Println("Pinger recv: ", v)
 		if v.Count > p.numRuns {
 			break
 		}
@@ -60,7 +60,7 @@ type Ponger struct {
 func (p *Ponger) Run() {
 	p.pongChan <- &Msg{"hello from Ponger", 0}  //initiate ping-pong
 	for v := range p.pingChan {
-		fmt.Println("Ponger recv: ", v)
+		//fmt.Println("Ponger recv: ", v)
 		p.pongChan <- &Msg{"hello from Ponger", v.Count+1}
 	}
 	close(p.pongChan)

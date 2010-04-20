@@ -20,6 +20,7 @@ var (
 	errInvalidChan           = "invalid channels be attached to router; valid channel types: chan bool/int/float/string/*struct"
 	errInvalidBindChan       = "invalid channels for notifying sender/recver attachment"
 	errChanTypeMismatch      = "channels of diff type attach to matched id"
+	errChanGenericType       = "channels of gnericMsg attached as first"
 	errDetachChanNotInRouter = "try to detach a channel which is not attached to router"
 	errDupAttachment         = "a channel has been attached to same id more than once"
 	errInvalidId             = "invalid id"
@@ -64,12 +65,11 @@ type LogRecord struct {
 }
 
 type logger struct {
-	bindEvtChan chan *BindEvent
+	endp        *Endpoint
 	source      string
 	logChan     chan *LogRecord
 	router      Router
 	id          Id
-	recved      bool
 }
 
 func newlogger(id Id, r Router, src string, bufSize int) *logger {
@@ -77,9 +77,9 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 	logger.id = id
 	logger.router = r
 	logger.source = src
-	logger.bindEvtChan = make(chan *BindEvent, 1) //just need the latest binding event
 	logger.logChan = make(chan *LogRecord, bufSize)
-	err := logger.router.AttachSendChan(id, logger.logChan, logger.bindEvtChan)
+	var err os.Error
+	logger.endp, err = logger.router.AttachSendChan(id, logger.logChan)
 	if err != nil {
 		log.Crash("failed to add logger for ", logger.source)
 		return nil
@@ -88,16 +88,7 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 }
 
 func (l *logger) log(p LogPriority, msg interface{}) {
-	if len(l.bindEvtChan) > 0 {
-		be := <-l.bindEvtChan
-		if be.Count > 0 {
-			l.recved = true
-		} else {
-			l.recved = false
-		}
-	}
-
-	if !l.recved {
+	if l.endp.NumBindings() == 0 {
 		return
 	}
 
@@ -181,7 +172,7 @@ func (l *LogSink) Close() {
 }
 
 func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
-	err := r.AttachRecvChan(logId, l.sinkChan)
+	_, err := r.AttachRecvChan(logId, l.sinkChan)
 	if err != nil {
 		log.Stderr("*** failed to enable router's console log sink ***")
 		return
@@ -231,7 +222,7 @@ type FaultRecord struct {
 }
 
 type faultRaiser struct {
-	bindEvtChan chan *BindEvent
+	endp        *Endpoint
 	source      string
 	faultChan   chan *FaultRecord
 	router      *routerImpl
@@ -244,9 +235,9 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 	faultRaiser.id = id
 	faultRaiser.router = r.(*routerImpl)
 	faultRaiser.source = src
-	faultRaiser.bindEvtChan = make(chan *BindEvent, 1) //just need the latest binding event
 	faultRaiser.faultChan = make(chan *FaultRecord, bufSize)
-	err := faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan, faultRaiser.bindEvtChan)
+	var err os.Error
+	faultRaiser.endp, err = faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan)
 	if err != nil {
 		log.Stderr("failed to add faultRaiser for [%v, %v]", faultRaiser.source, id)
 		return nil
@@ -256,16 +247,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 }
 
 func (l *faultRaiser) raise(msg os.Error) {
-	if len(l.bindEvtChan) > 0 {
-		be := <-l.bindEvtChan
-		if be.Count > 0 {
-			l.caught = true
-		} else {
-			l.caught = false
-		}
-	}
-
-	if !l.caught {
+	if l.endp.NumBindings() == 0 {
 		//l.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
 		log.Crashf("Crash at %v", msg)
 		return

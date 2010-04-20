@@ -54,6 +54,20 @@ func Broadcast(v reflect.Value, recvers []*Endpoint) {
 //BroadcastPolicy is used to generate broadcast dispatcher instances
 var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })
 
+//KeepLastBroadcast never block. if running out of Chan buffer, drop old items and keep the latest items
+func KeepLatestBroadcast(v reflect.Value, recvers []*Endpoint) {
+	for _, rc := range recvers {
+		if !rc.Chan.Closed() {
+			for !rc.Chan.TrySend(v) {
+				rc.Chan.TryRecv()
+			}
+		}
+	}
+}
+
+//KeepLatestBroadcastPolicy is used to generate KeepLatest broadcast dispatcher instances
+var KeepLatestBroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(KeepLatestBroadcast) })
+
 //Roundrobin dispatcher will keep the "next" index as its state
 type Roundrobin struct {
 	next int
@@ -116,7 +130,7 @@ func NewTimeoutDropBroadcaster(to int64) *TimeoutDropBroadcaster {
 	return &TimeoutDropBroadcaster{to}
 }
 
-func (r *TimeoutDropBroadcaster) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -160,7 +174,7 @@ func (r *TimeoutReportBroadcaster) SendAndKeepLatest(to *TimeoutEvent) {
 	}
 }
 
-func (r *TimeoutReportBroadcaster) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -206,7 +220,7 @@ func NewKeepLatestBroadcaster(to int64) *KeepLatestBroadcaster {
 	return &KeepLatestBroadcaster{to}
 }
 
-func (r *KeepLatestBroadcaster) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)

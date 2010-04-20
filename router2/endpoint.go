@@ -12,6 +12,25 @@ import (
 	"container/vector"
 )
 
+/* 
+* interface of reflect.ChanValue:
+* used internally for all channels attached to router
+* intended to integrate "chan primitives" and "chan *GenericMsg"
+*/
+type reflectChanValue interface {
+	Type() reflect.Type
+	Interface() interface{}
+	Cap() int
+	Close()
+	Closed() bool
+	IsNil() bool
+	Len() int
+	Recv() reflect.Value
+	Send(reflect.Value)
+	TryRecv() reflect.Value
+	TrySend(reflect.Value) bool
+}
+
 type endpointType int
 
 const (
@@ -31,26 +50,39 @@ type oper struct {
 	peer *Endpoint
 }
 
+/*
+ Endpoints are where channels are attached to router. They expose the following info:
+    1. Id - the id which channel is attached to
+    2. Chan - the attached channel
+    3. NumBindings() - return the number of bound peers
+*/
 type Endpoint struct {
 	kind       endpointType
 	Id         Id
-	Chan       *reflect.ChanValue //ext SendChan/RecvChan, attached by clients
+	Chan       reflectChanValue //external SendChan/RecvChan, attached by clients
 	dispatcher Dispatcher         //current for push dispacher, only sender uses dispatcher
 	bindChan   chan *BindEvent
 	bindLock   sync.Mutex
 	bindings   []*Endpoint //binding_set
 	inDisp     bool        //in a dispatch loop
 	opBuf      *vector.Vector
+	genFlag    bool
 	flag       bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 }
 
-func newEndpoint(id Id, t endpointType, ch *reflect.ChanValue, bc chan *BindEvent) *Endpoint {
+func newEndpoint(id Id, t endpointType, ch reflectChanValue, bc chan *BindEvent) *Endpoint {
 	endp := &Endpoint{}
 	endp.kind = t
 	endp.Id = id
 	endp.Chan = ch
 	endp.bindChan = bc
 	return endp
+}
+
+func (e *Endpoint) NumBindings() int {
+	e.bindLock.Lock()
+	defer e.bindLock.Unlock()
+	return len(e.bindings)
 }
 
 func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
@@ -61,7 +93,7 @@ func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
 	}
 }
 
-func (e *Endpoint) Close() {
+func (e *Endpoint) close() {
 	if e.bindChan != nil {
 		close(e.bindChan)
 	}
@@ -172,12 +204,8 @@ func (e *Endpoint) detach(p *Endpoint) {
 					if e.bindChan != nil {
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
-						//only close it when flag is set
 						for !(e.bindChan <- &BindEvent{EndOfData, 0}) {
 							<-e.bindChan
-						}
-						if e.flag {
-							e.Chan.Close()
 						}
 					} else {
 						//since no bindChan, user code is not monitoring bind status

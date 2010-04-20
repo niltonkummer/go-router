@@ -49,10 +49,11 @@ type Router interface {
 	//Attach chans to id in router, with an optional argument (chan *BindEvent)
 	//currently only accept the following chan types: chan bool/int/float/string/*struct
 	//When specified, the optional argument will serve two purposes:
-	//1. used to tell when other ends connecting/disconn
+	//1. used to tell when the remote peers connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
-	AttachSendChan(Id, interface{}, ...) os.Error
-	AttachRecvChan(Id, interface{}, ...) os.Error
+	//the returned Endpoint object can be used to find the number of bound peers: endp.NumBindings()
+	AttachSendChan(Id, interface{}, ...) (*Endpoint, os.Error)
+	AttachRecvChan(Id, interface{}, ...) (*Endpoint, os.Error)
 
 	//Detach sendChan/recvChan from router
 	DetachChan(Id, interface{}) os.Error
@@ -189,7 +190,7 @@ func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.
 	return
 }
 
-func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Error) {
+func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (endp *Endpoint, err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
@@ -228,7 +229,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 			return
 		}
 	}
-	endp := newEndpoint(id, senderType, ch, bindChan)
+	endp = newEndpoint(id, senderType, ch, bindChan)
 	err = s.attach(endp)
 	if err != nil {
 		s.LogError(err)
@@ -237,21 +238,26 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	return
 }
 
-func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Error) {
+func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (endp *Endpoint, err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	ch, err := s.validateChan(v)
-	if err != nil {
-		s.LogError(err)
-		s.Raise(err)
-		return
+	var ch reflectChanValue
+	gChan, ok := v.(*genericMsgChan)
+	if ok {
+		ch = gChan
+	} else {
+		ch, err = s.validateChan(v)
+		if err != nil {
+			s.LogError(err)
+			s.Raise(err)
+			return
+		}
 	}
 	av := reflect.NewValue(args).(*reflect.StructValue)
 	var bindChan chan *BindEvent
-	var ok, flag bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 	if av.NumField() > 0 {
 		for i := 0; i < av.NumField(); i++ {
 			switch cv := av.Field(i).(type) {
@@ -270,8 +276,6 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 					s.Raise(err)
 					return
 				}
-			case *reflect.BoolValue:
-				flag = cv.Get()
 			default:
 				err = os.ErrorString("invalid arguments to attach recv chan")
 				s.LogError(err)
@@ -280,8 +284,10 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 			}
 		}
 	}
-	endp := newEndpoint(id, recverType, ch, bindChan)
-	endp.flag = flag
+	endp = newEndpoint(id, recverType, ch, bindChan)
+	if gChan != nil {
+		endp.genFlag = true
+	}
 	err = s.attach(endp)
 	if err != nil {
 		s.LogError(err)
@@ -297,15 +303,21 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	cv, err := s.validateChan(v)
-	if err != nil {
-		s.LogError(err)
-		s.Raise(err)
-		return
+	var ch reflectChanValue
+	gChan, ok := v.(*genericMsgChan)
+	if ok {
+		ch = gChan
+	} else {
+		ch, err = s.validateChan(v)
+		if err != nil {
+			s.LogError(err)
+			s.Raise(err)
+			return
+		}
 	}
 	endp := &Endpoint{}
 	endp.Id = id
-	endp.Chan = cv
+	endp.Chan = ch
 	err = s.detach(endp)
 	return
 }
@@ -327,6 +339,12 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 	//router entry
 	ent, ok := s.routingTable[endp.Id.Key()]
 	if !ok {
+		if endp.genFlag {
+			err = os.ErrorString(fmt.Sprintf("%s %v", errChanGenericType, endp.Id))
+			s.LogError(err)
+			s.tblLock.Unlock()
+			return
+		}
 		//first endpoint attached to this id, add a router-entry for this id
 		ent = &tblEntry{}
 		s.routingTable[endp.Id.Key()] = ent
@@ -335,7 +353,7 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 		ent.senders = make(map[interface{}]*Endpoint)
 		ent.recvers = make(map[interface{}]*Endpoint)
 	} else {
-		if endp.Chan.Type().(*reflect.ChanType) != ent.chanType {
+		if !endp.genFlag && endp.Chan.Type().(*reflect.ChanType) != ent.chanType {
 			err = os.ErrorString(fmt.Sprintf("%s %v", errChanTypeMismatch, endp.Id))
 			s.LogError(err)
 			s.tblLock.Unlock()
@@ -382,9 +400,6 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 			for _, sender := range ent.senders {
 				if scope_match(sender.Id, endp.Id) {
 					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
-					if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-						s.notifier.setFlag(sender.Id, idx, true)
-					}
 					matches.Push(sender)
 				}
 			}
@@ -392,7 +407,8 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 	} else { //for PrefixMatch & AssocMatch, need to iterate thru all entries in map routingTable
 		for _, ent2 := range s.routingTable {
 			if endp.Id.Match(ent2.id) {
-				if endp.Chan.Type().(*reflect.ChanType) == ent2.chanType {
+				if endp.Chan.Type().(*reflect.ChanType) == ent2.chanType ||
+					(endp.kind == recverType && endp.genFlag) {
 					switch endp.kind {
 					case senderType:
 						for _, recver := range ent2.recvers {
@@ -404,9 +420,6 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 					case recverType:
 						for _, sender := range ent2.senders {
 							if scope_match(sender.Id, endp.Id) {
-								if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-									s.notifier.setFlag(sender.Id, idx, true)
-								}
 								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
 								matches.Push(sender)
 							}
@@ -503,7 +516,7 @@ func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
 	}
 
 	//close endpoint's chans, so any goroutines waiting on them will exit
-	endp1.Close()
+	endp1.close()
 
 	//notifier will send in a separate goroutine, so non-blocking here
 	idx := s.getSysIdIdx(endp1.Id)
@@ -536,7 +549,7 @@ func (s *routerImpl) shutdown() {
 	//close all enndpoint send chans
 	for _, ent := range s.routingTable {
 		for _, sender := range ent.senders {
-			sender.Close()
+			sender.close()
 		}
 	}
 
@@ -547,7 +560,7 @@ func (s *routerImpl) shutdown() {
 
 	for _, ent := range s.routingTable {
 		for _, recver := range ent.recvers {
-			recver.Close()
+			recver.close()
 		}
 	}
 }
