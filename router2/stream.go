@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"fmt"
-	"sync"
 )
 
 type stream struct {
@@ -21,7 +20,6 @@ type stream struct {
 	rwc        io.ReadWriteCloser
 	mar        Marshaler
 	demar      Demarshaler
-	sync.Mutex //lock for sharing sending socket-end between ctrl msgs and app msgs
 	//
 	proxy *proxyImpl
 	//others
@@ -60,7 +58,10 @@ func (s *stream) start() {
 
 func (s *stream) Close() {
 	s.Log(LOG_INFO, "Close() is called")
-	s.closeImpl()
+	//shutdown outputMainLoop
+	close(s.outputChan) 
+	//notify peer
+	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
 }
 
 func (s *stream) closeImpl() {
@@ -86,26 +87,9 @@ func (s *stream) appMsgChanForId(id Id) (reflectChanValue, int) {
 
 //send ctrl data to io.Writer
 func (s *stream) sendCtrlMsg(m *genericMsg) (err os.Error) {
-	s.Lock()
-	if err = s.mar.Marshal(m.Id); err != nil {
-		s.LogError(err)
-		//s.Raise(err)
-	} else {
-		if err = s.mar.Marshal(m.Data); err != nil {
-			s.LogError(err)
-			//s.Raise(err)
-		}
-	}
-	s.Unlock()
-	s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", m.Id))
-	if err != nil {
-		//must be io conn fail or marshal fail
-		//notify proxy disconn
-		s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
-	}
-	if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) || err != nil {
-		s.closeImpl()
-		s.Log(LOG_INFO, "stream exit at output")
+	s.outputChan <- m
+	if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) {
+		close(s.outputChan)
 	}
 	return
 }
@@ -120,7 +104,6 @@ func (s *stream) outputMainLoop() {
 		if closed(s.outputChan) {
 			cont = false
 		} else {
-			s.Lock()
 			if err = s.mar.Marshal(m.Id); err != nil {
 				s.LogError(err)
 				//s.Raise(err)
@@ -132,7 +115,6 @@ func (s *stream) outputMainLoop() {
 					cont = false
 				}
 			}
-			s.Unlock()
 		}
 	}
 	if err != nil {
@@ -156,7 +138,7 @@ func (s *stream) inputMainLoop() {
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
 	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
-	//s.closeImpl() only called from outputMainLoop
+	s.closeImpl() 
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
 
