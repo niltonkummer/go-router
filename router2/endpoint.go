@@ -81,7 +81,19 @@ func newEndpoint(id Id, t endpointType, ch reflectChanValue, bc chan *BindEvent)
 func (e *Endpoint) NumBindings() int {
 	e.bindLock.Lock()
 	defer e.bindLock.Unlock()
-	return len(e.bindings)
+	num := len(e.bindings)
+	if e.opBuf != nil {
+		for i := 0; i < e.opBuf.Len(); i++ {
+			op := e.opBuf.At(i).(oper)
+			switch op.kind {
+			case attachOp:
+				num++
+			case detachOp:
+				num--
+			}
+		}
+	}
+	return num
 }
 
 func (e *Endpoint) start(bufSize int, disp DispatchPolicy) {
@@ -110,12 +122,11 @@ func (e *Endpoint) senderLoop() {
 			e.dispatcher.Dispatch(v, e.bindings)
 			e.bindLock.Lock()
 			e.inDisp = false
-			opBuf := e.opBuf
-			e.opBuf = nil
-			e.bindLock.Unlock()
-			if opBuf != nil {
-				e.runPendingOps(opBuf)
+			if e.opBuf != nil {
+				e.runPendingOps(e.opBuf)
+				e.opBuf = nil
 			}
+			e.bindLock.Unlock()
 		} else {
 			e.bindLock.Lock()
 			e.detachAllRecvChans()
@@ -130,9 +141,9 @@ func (e *Endpoint) runPendingOps(opBuf *vector.Vector) {
 		op := opBuf.At(i).(oper)
 		switch op.kind {
 		case attachOp:
-			e.attach(op.peer)
+			e.attachImpl(op.peer)
 		case detachOp:
-			e.detach(op.peer)
+			e.detachImpl(op.peer)
 		}
 	}
 }
@@ -145,16 +156,7 @@ func (e *Endpoint) detachAllRecvChans() {
 	e.bindings = e.bindings[0:0]
 }
 
-func (e *Endpoint) attach(p *Endpoint) {
-	e.bindLock.Lock()
-	if e.inDisp {
-		if e.opBuf == nil {
-			e.opBuf = new(vector.Vector)
-		}
-		e.opBuf.Push(oper{attachOp, p})
-		e.bindLock.Unlock()
-		return
-	}
+func (e *Endpoint) attachImpl(p *Endpoint) {
 	len0 := len(e.bindings)
 	if len0 == cap(e.bindings) {
 		//expand
@@ -164,7 +166,6 @@ func (e *Endpoint) attach(p *Endpoint) {
 	}
 	e.bindings = e.bindings[0 : len0+1]
 	e.bindings[len0] = p
-	e.bindLock.Unlock()
 	if e.bindChan != nil {
 		//KeepLatest non-blocking send
 		for !(e.bindChan <- &BindEvent{PeerAttach, len0 + 1}) { //chan full
@@ -173,17 +174,20 @@ func (e *Endpoint) attach(p *Endpoint) {
 	}
 }
 
-func (e *Endpoint) detach(p *Endpoint) {
+func (e *Endpoint) attach(p *Endpoint) {
 	e.bindLock.Lock()
+	defer e.bindLock.Unlock()
 	if e.inDisp {
 		if e.opBuf == nil {
 			e.opBuf = new(vector.Vector)
 		}
-		e.opBuf.Push(oper{detachOp, p})
-		e.bindLock.Unlock()
-		return
+		e.opBuf.Push(oper{attachOp, p})
+	} else {
+		e.attachImpl(p)
 	}
-	defer e.bindLock.Unlock()
+}
+
+func (e *Endpoint) detachImpl(p *Endpoint) {
 	n := len(e.bindings)
 	for i, v := range e.bindings {
 		if v == p {
@@ -215,5 +219,18 @@ func (e *Endpoint) detach(p *Endpoint) {
 			}
 			return
 		}
+	}
+}
+
+func (e *Endpoint) detach(p *Endpoint) {
+	e.bindLock.Lock()
+	defer e.bindLock.Unlock()
+	if e.inDisp {
+		if e.opBuf == nil {
+			e.opBuf = new(vector.Vector)
+		}
+		e.opBuf.Push(oper{detachOp, p})
+	} else {
+		e.detachImpl(p)
 	}
 }
