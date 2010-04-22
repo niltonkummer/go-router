@@ -50,217 +50,217 @@ func (g gobMarshallingPolicy) NewDemarshaler(r io.Reader) Demarshaler {
 	return (*gobDemarshaler)(gob.NewDecoder(r))
 }
 
-func (gm *gobMarshaler) Marshal(e interface{}) os.Error {
-	v := reflect.Indirect(reflect.NewValue(e))
-	switch v := v.(type) {
-	case *reflect.BoolValue:
-		w := boolWrapper{v.Get()}
-		return ((*gob.Encoder)(gm)).Encode(w)
-	case *reflect.IntValue:
-		w := intWrapper{v.Get()}
-		return ((*gob.Encoder)(gm)).Encode(w)
-	/*
-		case *reflect.Int8Value:
-		case *reflect.Int16Value:
-		case *reflect.Int32Value:
-		case *reflect.Int64Value:
-		case *reflect.UintValue:
-		case *reflect.Uint8Value:
-		case *reflect.Uint16Value:
-		case *reflect.Uint32Value:
-		case *reflect.Uint64Value:
-		case *reflect.UintptrValue:
-	*/
-	case *reflect.FloatValue:
-		w := floatWrapper{v.Get()}
-		return ((*gob.Encoder)(gm)).Encode(w)
-	/*
-		case *reflect.Float32Value:
-		case *reflect.Float64Value:
-	*/
-	case *reflect.StringValue:
-		w := strWrapper{v.Get()}
-		return ((*gob.Encoder)(gm)).Encode(w)
-	/*
-		case *reflect.ArrayValue:
-		case *reflect.SliceValue:
-	*/
-	case *reflect.StructValue:
-		switch e1 := e.(type) {
-		case *ConnInfoMsg:
-			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.SeedId != nil}); err != nil {
-				return err
-			}
-			if e1.SeedId != nil {
-				if err := ((*gob.Encoder)(gm)).Encode(e1.SeedId); err != nil {
-					return err
-				}
-			}
-			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.Error != nil}); err != nil {
-				return err
-			}
-			if e1.Error != nil {
-				if err := ((*gob.Encoder)(gm)).Encode(strWrapper{e1.Error.String()}); err != nil {
-					return err
-				}
-			}
-			if err := ((*gob.Encoder)(gm)).Encode(boolWrapper{len(e1.ConnInfo) > 0}); err != nil {
-				return err
-			}
-			if len(e1.ConnInfo) > 0 {
-				if err := ((*gob.Encoder)(gm)).Encode(strWrapper{e1.ConnInfo}); err != nil {
-					return err
-				}
-			}
-			return nil
-		case *IdChanInfoMsg:
-			num := len(e1.Info)
-			w := &intWrapper{num}
-			if err := ((*gob.Encoder)(gm)).Encode(w); err != nil {
-				return err
-			}
-			for _, v := range e1.Info {
-				if err := ((*gob.Encoder)(gm)).Encode(v.Id); err != nil {
-					return err
-				}
-				if v.ElemType == nil {
-					v.ElemType = new(chanElemTypeData)
-					elemType := v.ChanType.Elem()
-					v.ElemType.FullName = elemType.PkgPath() + "." + elemType.Name()
-				}
-				if err := ((*gob.Encoder)(gm)).Encode(v.ElemType); err != nil {
-					return err
-				}
-			}
-			return nil
-		case Id:
-			if err := ((*gob.Encoder)(gm)).Encode(e); err != nil {
-				return err
-			}
-			return nil
-		default:
-			return ((*gob.Encoder)(gm)).Encode(v.Interface())
+func (gm *gobMarshaler) Marshal(e interface{}) (err os.Error) {
+	switch e1 := e.(type) {
+	case Id:
+		err = ((*gob.Encoder)(gm)).Encode(e)
+		return
+	case *ConnInfoMsg:
+		if err = ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.SeedId != nil}); err != nil {
+			return
 		}
+		if e1.SeedId != nil {
+			if err = ((*gob.Encoder)(gm)).Encode(e1.SeedId); err != nil {
+				return
+			}
+		}
+		if err = ((*gob.Encoder)(gm)).Encode(boolWrapper{e1.Error != nil}); err != nil {
+			return
+		}
+		if e1.Error != nil {
+			if err = ((*gob.Encoder)(gm)).Encode(strWrapper{e1.Error.String()}); err != nil {
+				return
+			}
+		}
+		if err = ((*gob.Encoder)(gm)).Encode(boolWrapper{len(e1.ConnInfo) > 0}); err != nil {
+			return
+		}
+		if len(e1.ConnInfo) > 0 {
+			if err = ((*gob.Encoder)(gm)).Encode(strWrapper{e1.ConnInfo}); err != nil {
+				return
+			}
+		}
+		return nil
+	case *IdChanInfoMsg:
+		num := len(e1.Info)
+		w := &intWrapper{num}
+		if err = ((*gob.Encoder)(gm)).Encode(w); err != nil {
+			return
+		}
+		for _, v := range e1.Info {
+			if err = ((*gob.Encoder)(gm)).Encode(v.Id); err != nil {
+				return
+			}
+			if v.ElemType == nil {
+				v.ElemType = new(chanElemTypeData)
+				elemType := v.ChanType.Elem()
+				v.ElemType.FullName = elemType.PkgPath() + "." + elemType.Name()
+			}
+			if err = ((*gob.Encoder)(gm)).Encode(v.ElemType); err != nil {
+				return
+			}
+		}
+		return nil
 	default:
-		return os.ErrorString("unknown chan elem type found in gobMarshaler.Marshal")
+		v := reflect.Indirect(reflect.NewValue(e))
+		switch v := v.(type) {
+		case *reflect.StructValue:
+			return ((*gob.Encoder)(gm)).Encode(v.Interface())
+		case *reflect.BoolValue:
+			w := boolWrapper{v.Get()}
+			return ((*gob.Encoder)(gm)).Encode(w)
+		case *reflect.IntValue:
+			w := intWrapper{v.Get()}
+			return ((*gob.Encoder)(gm)).Encode(w)
+			/*
+			 case *reflect.Int8Value:
+			 case *reflect.Int16Value:
+			 case *reflect.Int32Value:
+			 case *reflect.Int64Value:
+			 case *reflect.UintValue:
+			 case *reflect.Uint8Value:
+			 case *reflect.Uint16Value:
+			 case *reflect.Uint32Value:
+			 case *reflect.Uint64Value:
+			 case *reflect.UintptrValue:
+			 */
+		case *reflect.FloatValue:
+			w := floatWrapper{v.Get()}
+			return ((*gob.Encoder)(gm)).Encode(w)
+			/*
+			 case *reflect.Float32Value:
+			 case *reflect.Float64Value:
+			 */
+		case *reflect.StringValue:
+			w := strWrapper{v.Get()}
+			return ((*gob.Encoder)(gm)).Encode(w)
+			/*
+			 case *reflect.ArrayValue:
+			 case *reflect.SliceValue:
+			 */
+		default:
+			return os.ErrorString("unknown chan elem type found in gobMarshaler.Marshal")
+		}
 	}
 	return nil
 }
 
-func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) os.Error {
-	if val == nil {
-		val = reflect.NewValue(e)
-	}
-	v := reflect.Indirect(val)
-	switch v := v.(type) {
-	case *reflect.BoolValue:
-		w := &boolWrapper{}
-		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
-			return err
+func (gm *gobDemarshaler) Demarshal(e interface{}, val reflect.Value) (err os.Error) {
+	switch e1 := e.(type) {
+	case Id:
+		return ((*gob.Decoder)(gm)).Decode(e)
+	case *ConnInfoMsg:
+		flag := &boolWrapper{}
+		if err = ((*gob.Decoder)(gm)).Decode(flag); err != nil {
+			return
 		}
-		v.Set(w.Val)
-	case *reflect.IntValue:
-		w := &intWrapper{}
-		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
-			return err
+		if flag.Val {
+			if err = ((*gob.Decoder)(gm)).Decode(e1.SeedId); err != nil {
+				return
+			}
 		}
-		v.Set(w.Val)
-	/*
-		case *reflect.Int8Value:
-		case *reflect.Int16Value:
-		case *reflect.Int32Value:
-		case *reflect.Int64Value:
-		case *reflect.UintValue:
-		case *reflect.Uint8Value:
-		case *reflect.Uint16Value:
-		case *reflect.Uint32Value:
-		case *reflect.Uint64Value:
-		case *reflect.UintptrValue:
-	*/
-	case *reflect.FloatValue:
-		w := &floatWrapper{}
-		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
-			return err
+		flag.Val = false
+		if err = ((*gob.Decoder)(gm)).Decode(flag); err != nil {
+			return
 		}
-		v.Set(w.Val)
-	/*
-		case *reflect.Float32Value:
-		case *reflect.Float64Value:
-	*/
-	case *reflect.StringValue:
-		w := &strWrapper{}
-		if err := ((*gob.Decoder)(gm)).Decode(w); err != nil {
-			return err
+		if flag.Val {
+			str := &strWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(str); err != nil {
+				return
+			}
+			e1.Error = os.ErrorString(str.Val)
 		}
-		v.Set(w.Val)
-	/*
-		case *reflect.ArrayValue:
-		case *reflect.SliceValue:
-	*/
-	case *reflect.StructValue:
-		switch e1 := e.(type) {
-		case *ConnInfoMsg:
-			flag := &boolWrapper{}
-			if err := ((*gob.Decoder)(gm)).Decode(flag); err != nil {
-				return err
+		flag.Val = false
+		if err = ((*gob.Decoder)(gm)).Decode(flag); err != nil {
+			return
+		}
+		if flag.Val {
+			str := &strWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(str); err != nil {
+				return
 			}
-			if flag.Val {
-				if err := ((*gob.Decoder)(gm)).Decode(e1.SeedId); err != nil {
-					return err
-				}
+			e1.ConnInfo = str.Val
+		}
+		return
+	case *IdChanInfoMsg:
+		dummyId := e1.Info[0].Id
+		num := &intWrapper{}
+		if err = ((*gob.Decoder)(gm)).Decode(num); err != nil {
+			return
+		}
+		info := make([]*IdChanInfo, num.Val)
+		for i := 0; i < num.Val; i++ {
+			ici := new(IdChanInfo)
+			ici.Id, _ = dummyId.Clone()
+			if err = ((*gob.Decoder)(gm)).Decode(ici.Id); err != nil {
+				return
 			}
-			flag.Val = false
-			if err := ((*gob.Decoder)(gm)).Decode(flag); err != nil {
-				return err
+			ici.ElemType = new(chanElemTypeData)
+			if err = ((*gob.Decoder)(gm)).Decode(ici.ElemType); err != nil {
+				return
 			}
-			if flag.Val {
-				str := &strWrapper{}
-				if err := ((*gob.Decoder)(gm)).Decode(str); err != nil {
-					return err
-				}
-				e1.Error = os.ErrorString(str.Val)
-			}
-			flag.Val = false
-			if err := ((*gob.Decoder)(gm)).Decode(flag); err != nil {
-				return err
-			}
-			if flag.Val {
-				str := &strWrapper{}
-				if err := ((*gob.Decoder)(gm)).Decode(str); err != nil {
-					return err
-				}
-				e1.ConnInfo = str.Val
-			}
-			return nil
-		case *IdChanInfoMsg:
-			dummyId := e1.Info[0].Id
-			num := &intWrapper{}
-			if err := ((*gob.Decoder)(gm)).Decode(num); err != nil {
-				return err
-			}
-			info := make([]*IdChanInfo, num.Val)
-			for i := 0; i < num.Val; i++ {
-				ici := new(IdChanInfo)
-				ici.Id, _ = dummyId.Clone()
-				if err := ((*gob.Decoder)(gm)).Decode(ici.Id); err != nil {
-					return err
-				}
-				ici.ElemType = new(chanElemTypeData)
-				if err := ((*gob.Decoder)(gm)).Decode(ici.ElemType); err != nil {
-					return err
-				}
-				info[i] = ici
-			}
-			e1.Info = info
-			return nil
-		default:
+			info[i] = ici
+		}
+		e1.Info = info
+		return
+	default:
+		if val == nil {
+			val = reflect.NewValue(e)
+		}
+		v := reflect.Indirect(val)
+		switch v := v.(type) {
+		case *reflect.StructValue:
 			return ((*gob.Decoder)(gm)).Decode(e)
+		case *reflect.BoolValue:
+			w := &boolWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(w); err != nil {
+				return
+			}
+			v.Set(w.Val)
+		case *reflect.IntValue:
+			w := &intWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(w); err != nil {
+				return
+			}
+			v.Set(w.Val)
+			/*
+			 case *reflect.Int8Value:
+			 case *reflect.Int16Value:
+			 case *reflect.Int32Value:
+			 case *reflect.Int64Value:
+			 case *reflect.UintValue:
+			 case *reflect.Uint8Value:
+			 case *reflect.Uint16Value:
+			 case *reflect.Uint32Value:
+			 case *reflect.Uint64Value:
+			 case *reflect.UintptrValue:
+			 */
+		case *reflect.FloatValue:
+			w := &floatWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(w); err != nil {
+				return
+			}
+			v.Set(w.Val)
+			/*
+			 case *reflect.Float32Value:
+			 case *reflect.Float64Value:
+			 */
+		case *reflect.StringValue:
+			w := &strWrapper{}
+			if err = ((*gob.Decoder)(gm)).Decode(w); err != nil {
+				return
+			}
+			v.Set(w.Val)
+			/*
+			 case *reflect.ArrayValue:
+			 case *reflect.SliceValue:
+			 */
+		default:
+			return os.ErrorString("unknown chan elem type found in gobMarshaler.demarshal")
 		}
 
-	default:
-		return os.ErrorString("unknown chan elem type found in gobMarshaler.demarshal")
 	}
-	return nil
+	return
 }
 
 // marshalling policy using json

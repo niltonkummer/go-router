@@ -7,6 +7,8 @@ import (
 	"router"
 )
 
+var showPingPong bool = true
+
 //Msg instances are bounced between Pinger and Ponger as balls
 type Msg struct {
 	Data string
@@ -25,7 +27,9 @@ type Pinger struct {
 
 func (p *Pinger) Run() {
 	for v := range p.pongChan {
-		//fmt.Println("Pinger recv: ", v)
+		if showPingPong {
+			fmt.Println("Pinger recv: ", v)
+		}
 		if v.Count > p.numRuns {
 			break
 		}
@@ -58,7 +62,9 @@ type Ponger struct {
 func (p *Ponger) Run() {
 	p.pongChan <- &Msg{"hello from Ponger", 0}  //initiate ping-pong
 	for v := range p.pingChan {
-		//fmt.Println("Ponger recv: ", v)
+		if showPingPong {
+			fmt.Println("Ponger recv: ", v)
+		}
 		p.pongChan <- &Msg{"hello from Ponger", v.Count+1}
 	}
 	close(p.pongChan)
@@ -86,8 +92,10 @@ func newPonger(rot router.Router, done chan<- bool) {
 func main() {
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Println("Usage: pingpong2 num_runs")
+		fmt.Println("Usage: pingpong2 num_runs hideTrace")
 		return
+	} else if flag.NArg() > 1 {
+		showPingPong = false
 	}
 	numRuns, _ := strconv.Atoi(flag.Arg(0))
 	//alloc a router to connect Pinger and Ponger

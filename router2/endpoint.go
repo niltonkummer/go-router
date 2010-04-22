@@ -51,7 +51,7 @@ type oper struct {
 }
 
 /*
- Endpoints are where channels are attached to router. They expose the following info:
+ Endpoints are "attachment points" where channels are attached to router. They expose the following info:
     1. Id - the id which channel is attached to
     2. Chan - the attached channel
     3. NumBindings() - return the number of bound peers
@@ -67,7 +67,6 @@ type Endpoint struct {
 	inDisp     bool        //in a dispatch loop
 	opBuf      *vector.Vector
 	genFlag    bool
-	flag       bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
 }
 
 func newEndpoint(id Id, t endpointType, ch reflectChanValue, bc chan *BindEvent) *Endpoint {

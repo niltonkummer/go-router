@@ -242,10 +242,6 @@ func (p *proxyImpl) ctrlMainLoop() {
 		return
 	}
 
-	//at here, conn is ready, activate recv/forward goroutines
-	//p.sysChans.Start()
-	//p.appRecvChans.Start()
-
 	p.Log(LOG_INFO, "-- connection ready")
 
 	//normal msg pumping
@@ -987,17 +983,17 @@ func (sc *sysChans) SendConnInfo(idx int, data *ConnInfoMsg) {
 
 func (sc *sysChans) SendPubSubInfo(idx int, data *IdChanInfoMsg) {
 	if idx >= PubId || idx <= UnSubId {
-		//filter out sys internal ids
-		info := make([]*IdChanInfo, len(data.Info))
-		num := 0
-		for i := 0; i < len(data.Info); i++ {
-			if sc.proxy.router.getSysInternalIdIdx(data.Info[i].Id) < 0 {
-				info[num] = data.Info[i]
-				num++
-			}
-		}
 		sch, nb := sc.sysSendChans.findSender(sc.proxy.router.SysID(idx))
 		if sch != nil && nb > 0 {
+			//filter out sys internal ids
+			info := make([]*IdChanInfo, len(data.Info))
+			num := 0
+			for i := 0; i < len(data.Info); i++ {
+				if sc.proxy.router.getSysInternalIdIdx(data.Info[i].Id) < 0 {
+					info[num] = data.Info[i]
+					num++
+				}
+			}
 			sch.Send(reflect.NewValue(&IdChanInfoMsg{info[0:num]}))
 		}
 	}
