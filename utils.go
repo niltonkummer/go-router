@@ -236,7 +236,6 @@ func (s *senderInBundle) bindingCount() int {
 }
 
 func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) os.Error {
-	scb.router.Log(LOG_INFO, fmt.Sprintf("start 2..add sender for %v", id))
 	scb.Lock()
 	_, ok := scb.sendChans[id.Key()]
 	scb.Unlock()
@@ -309,7 +308,7 @@ func (scb *sendChanBundle) Send(id Id, data interface{}) os.Error {
 		nb := s.bindingCount()
 		if nb > 0 {
 			s.ch.Send(reflect.NewValue(data))
-			scb.router.Log(LOG_INFO, fmt.Sprintf("send appMsg for %v", s.id))
+			//scb.router.Log(LOG_INFO, fmt.Sprintf("send appMsg for %v", s.id))
 		}
 	}
 	return nil
