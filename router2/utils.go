@@ -216,7 +216,6 @@ func (scb *sendChanBundle) BindingCount(id Id) int {
 }
 
 func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) (err os.Error) {
-	scb.router.Log(LOG_INFO, fmt.Sprintf("start 2..add sender for %v", id))
 	scb.Lock()
 	_, ok := scb.sendChans[id.Key()]
 	scb.Unlock()

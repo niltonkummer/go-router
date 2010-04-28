@@ -14,26 +14,26 @@ test setup:
       GOMAXPROCS=32
 
 . pingpong1: using direct channels between Pinger and Ponger:
-real	0m1.747s
-user	0m0.576s
-sys	0m1.192s
+real	0m1.763s
+user	0m0.540s
+sys	0m1.220s
 
 . pingpong2: Pinger/Ponger using channels connected thru one router:
-real	0m9.029s
-user	0m3.780s
-sys	0m5.192s
+real	0m8.851s
+user	0m3.868s
+sys	0m4.972s
 
 . pingpong3: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are directly connected:
-real	0m27.252s
-user	0m15.165s
-sys	0m11.909s
+real	0m21.079s
+user	0m9.765s
+sys	0m11.169s
 
 . pingpong4: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are connected thru unix socket:
-real	1m11.944s
-user	0m49.243s
-sys	0m23.149s
+real	0m49.062s
+user	0m28.570s
+sys	0m21.261s
 
 
 trunk/router2:
@@ -47,24 +47,24 @@ trunk/router2:
 same setup as above
 
 . pingpong1: using direct channels between Pinger and Ponger:
-real	0m1.731s
-user	0m0.464s
-sys	0m1.260s
+real	0m1.769s
+user	0m0.584s
+sys	0m1.204s
 
 . pingpong2: Pinger/Ponger using channels connected thru one router:
-real	0m4.257s
-user	0m1.564s
-sys	0m2.652s
+real	0m4.243s
+user	0m1.660s
+sys	0m2.580s
 
 . pingpong3: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are directly connected:
-real	0m6.608s
-user	0m2.660s
-sys	0m3.908s
+real	0m6.622s
+user	0m2.704s
+sys	0m3.876s
 
 . pingpong4: Pinger's channels connected to router1 and Ponger's channels connected to
   router2 and router1/router2 are connected thru unix socket:
-real	0m44.092s
-user	0m31.618s
-sys	0m15.197s
+real	0m34.004s
+user	0m20.505s
+sys	0m14.929s
 

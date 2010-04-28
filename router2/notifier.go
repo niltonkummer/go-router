@@ -87,7 +87,7 @@ func (n notifier) notifySub(info *IdChanInfo) {
 }
 
 func (n notifier) notifyUnSub(info *IdChanInfo) {
-	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
+	n.router.Log(LOG_INFO, fmt.Sprintf("notifyUnSub: %v", info.Id))
 	nc := n.notifyChans[info.Id.Scope()]
 	if nc.endps[3].NumBindings() > 0 {
 		ok := nc.chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}

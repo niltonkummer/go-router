@@ -26,7 +26,7 @@ import (
 */
 type Proxy interface {
 	Connect(Proxy) os.Error
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) os.Error
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy) os.Error
 	Close()
 }
 
@@ -143,7 +143,7 @@ func (p1 *proxyImpl) Connect(pp Proxy) os.Error {
 	return <-p1.errChan
 }
 
-func (p *proxyImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) os.Error {
+func (p *proxyImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy) os.Error {
 	s := newStream(rwc, mar, p)
 	p.importConnChan = s.exportConnChan
 	p.importPubSubChan = s.exportPubSubChan
@@ -381,13 +381,13 @@ func (p *proxyImpl) ctrlMainLoop() {
 func (p *proxyImpl) dataMainLoop() {
 	p.Log(LOG_INFO, "-- dataMainLoop start")
 	for {
-		p.Log(LOG_INFO, "proxy wait for another app msg")
+		//p.Log(LOG_INFO, "proxy wait for another app msg")
 		m := <-p.importAppDataChan
 		if closed(p.importAppDataChan) {
 			p.Log(LOG_INFO, "proxy importAppDataChan closed")
 			break
 		}
-		p.Log(LOG_INFO, "proxy dataMainLoop recv/forward app msg")
+		//p.Log(LOG_INFO, "proxy dataMainLoop recv/forward app msg")
 		var err os.Error
 		if p.translator != nil {
 			err = p.appSendChans.Send(p.translator.TranslateInward(m.Id), m.Data)
@@ -397,7 +397,7 @@ func (p *proxyImpl) dataMainLoop() {
 		if err != nil {
 			p.LogError(err)
 		}
-		p.Log(LOG_INFO, "proxy finish one app msg")
+		//p.Log(LOG_INFO, "proxy finish one app msg")
 	}
 	p.Log(LOG_INFO, "-- dataMainLoop exit")
 }

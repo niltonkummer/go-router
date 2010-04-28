@@ -26,7 +26,7 @@ import (
 */
 type Proxy interface {
 	Connect(Proxy) os.Error
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) os.Error
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy) os.Error
 	Close()
 }
 
@@ -111,7 +111,7 @@ func (p1 *proxyImpl) Connect(pp Proxy) os.Error {
 	return <-p1.errChan
 }
 
-func (p *proxyImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) os.Error {
+func (p *proxyImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy) os.Error {
 	s := newStream(rwc, mar, p)
 	s.peer = p
 	p.peer = s

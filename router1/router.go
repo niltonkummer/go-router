@@ -67,7 +67,7 @@ type Router interface {
 	Connect(Router) (Proxy, Proxy, os.Error)
 
 	//Connect to a remote router thru io conn
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy) (Proxy, os.Error)
 
 	//--- other utils ---
 	//return pre-created SysIds according to the router's id-type, with ScopeGlobal / MemberLocal
@@ -772,7 +772,7 @@ func (r1 *routerImpl) Connect(r2 Router) (p1, p2 Proxy, err os.Error) {
 	return
 }
 
-func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) (p Proxy, err os.Error) {
+func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy) (p Proxy, err os.Error) {
 	p = NewProxy(r, "", nil, nil)
 	err = p.ConnectRemote(rwc, mar)
 	return

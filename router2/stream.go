@@ -26,9 +26,13 @@ type stream struct {
 	Logger
 	FaultRaiser
 	Closed bool
+	ptrBool *reflect.PtrValue
+	ptrInt *reflect.PtrValue
+	ptrFloat *reflect.PtrValue
+	ptrString *reflect.PtrValue
 }
 
-func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stream {
+func newStream(rwc io.ReadWriteCloser, mp MarshalingPolicy, p *proxyImpl) *stream {
 	s := new(stream)
 	s.proxy = p
 	//
@@ -48,6 +52,14 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	}
 	s.Logger.Init(p.router.SysID(RouterLogId), p.router, ln)
 	s.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln)
+	var xb *bool = nil
+	s.ptrBool = reflect.NewValue(xb).(*reflect.PtrValue)
+	var xi *int = nil
+	s.ptrInt = reflect.NewValue(xi).(*reflect.PtrValue)
+	var xf *float = nil
+	s.ptrFloat = reflect.NewValue(xf).(*reflect.PtrValue)
+	var xs *string = nil
+	s.ptrString = reflect.NewValue(xs).(*reflect.PtrValue)
 	return s
 }
 
@@ -145,7 +157,7 @@ func (s *stream) inputMainLoop() {
 func (s *stream) recv() (err os.Error) {
 	r := s.proxy.router
 	id, _ := r.seedId.Clone()
-	if err = s.demar.Demarshal(id, nil); err != nil {
+	if err = s.demar.Demarshal(id); err != nil {
 		s.LogError(err)
 		//s.Raise(err)
 		return
@@ -160,7 +172,7 @@ func (s *stream) recv() (err os.Error) {
 	case id.Match(r.SysID(ConnReadyId)):
 		idc, _ := r.seedId.Clone()
 		cim := &ConnInfoMsg{SeedId: idc}
-		if err = s.demar.Demarshal(cim, nil); err != nil {
+		if err = s.demar.Demarshal(cim); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
@@ -175,7 +187,7 @@ func (s *stream) recv() (err os.Error) {
 	case id.Match(r.SysID(UnSubId)):
 		idc, _ := r.seedId.Clone()
 		icm := &IdChanInfoMsg{[]*IdChanInfo{&IdChanInfo{idc, nil, nil}}}
-		if err = s.demar.Demarshal(icm, nil); err != nil {
+		if err = s.demar.Demarshal(icm); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
@@ -196,14 +208,33 @@ func (s *stream) recv() (err os.Error) {
 				s.Raise(os.ErrorString(errStr))
 				return
 			}
-			val := reflect.MakeZero(chanType.Elem())
-			ptrT, ok := chanType.Elem().(*reflect.PtrType)
-			if ok {
-				sto := reflect.MakeZero(ptrT.Elem())
-				val = reflect.MakeZero(ptrT)
-				val.(*reflect.PtrValue).PointTo(sto)
+			et := chanType.Elem()
+			val := reflect.MakeZero(et)
+			var ptrT *reflect.PtrValue
+			switch et := et.(type) {
+			case *reflect.BoolType:
+				ptrT = s.ptrBool
+				ptrT.PointTo(val)
+			case *reflect.IntType:
+				ptrT = s.ptrInt
+				ptrT.PointTo(val)
+			case *reflect.FloatType:
+				ptrT = s.ptrFloat
+				ptrT.PointTo(val)
+			case *reflect.StringType:
+				ptrT = s.ptrString
+				ptrT.PointTo(val)
+			case *reflect.PtrType:
+				sto := reflect.MakeZero(et.Elem())
+				ptrT = val.(*reflect.PtrValue)
+				ptrT.PointTo(sto)
+			default:
+				errStr := fmt.Sprintf("invalid chanType for id %v", id)
+				s.Log(LOG_ERROR, errStr)
+				s.Raise(os.ErrorString(errStr))
+				return
 			}
-			if err = s.demar.Demarshal(val.Interface(), val); err != nil {
+			if err = s.demar.Demarshal(ptrT.Interface()); err != nil {
 				s.LogError(err)
 				//s.Raise(err)
 				return
@@ -211,10 +242,10 @@ func (s *stream) recv() (err os.Error) {
 			peerChan, num := s.peer.appMsgChanForId(id)
 			if peerChan != nil && num > 0 {
 				peerChan.Send(val)
-				s.Log(LOG_INFO, fmt.Sprintf("send appMsg for %v", id))
+				//s.Log(LOG_INFO, fmt.Sprintf("send appMsg for %v", id))
 			}
 		}
 	}
-	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))
+	//s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))
 	return
 }
