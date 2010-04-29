@@ -7,7 +7,7 @@ include $(GOROOT)/src/Make.$(GOARCH)
 VERSION=router1
 
 # build executables
-all: test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 client server
+all: test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 pingpong5 client server
 
 test: package
 	$(GC) -I../$(VERSION)/_obj test.go
@@ -44,6 +44,11 @@ pingpong4: package
 	$(LD) -L../$(VERSION)/_obj -o $@ pingpong4.$O
 	@echo "Done. Executable is: $@"
 
+pingpong5: package
+	$(GC) -I../$(VERSION)/_obj pingpong5.go
+	$(LD) -L../$(VERSION)/_obj -o $@ pingpong5.$O
+	@echo "Done. Executable is: $@"
+
 client: package
 	$(GC) -I../$(VERSION)/_obj dummyserver/client.go
 	$(LD) -L../$(VERSION)/_obj -o $@ client.$O
@@ -63,7 +68,7 @@ server: package
 	@echo "Done. Executable is: $@"
 
 clean:
-	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 client server
+	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 pingpong5 client server
 
 package: ../$(VERSION)/_obj/router.a
 

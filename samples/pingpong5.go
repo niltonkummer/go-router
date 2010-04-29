@@ -6,9 +6,10 @@ import (
 	"flag"
 	"router"
 	"net"
-	"os"
 )
 
+var serverAddr string
+var httpServerAddr string
 var showPingPong bool = true
 
 //Msg instances are bounced between Pinger and Ponger as balls
@@ -101,7 +102,7 @@ func newPonger(rot router.Router, done chan<- bool) {
 func main() {
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Println("Usage: pingpong4 num_runs hideTrace")
+		fmt.Println("Usage: pingpong5 num_runs hideTrace")
 		return
 	} else if flag.NArg() > 1 {
 		showPingPong = false
@@ -115,9 +116,8 @@ func main() {
 	go func() { //setup Pinger sock conn
 		//wait for ponger up
 		<-connNow
-		//set up an io conn to ponger thru unix sock
-		addr := "/tmp/pingpong.test"
-		conn, _ := net.Dial("unix", "", addr)
+		//set up an io conn to ponger thru tcp sock
+		conn, _ := net.Dial("tcp", "", "[::]:9099")
 		fmt.Println("ping conn up")
 
 		//create router and connect it to io conn
@@ -128,10 +128,8 @@ func main() {
 		newPinger(rot, done, numRuns)
 	}()
 	go func() { //setup Ponger sock conn
-		//wait to set up an io conn thru unix sock
-		addr := "/tmp/pingpong.test"
-		os.Remove(addr)
-		l, _ := net.Listen("unix", addr)
+		//wait to set up an io conn thru tcp sock
+		l, _ := net.Listen("tcp", ":9099")
 		connNow <- true //notify pinger that ponger's ready to accept
 		conn, _ := l.Accept()
 		fmt.Println("pong conn up")
