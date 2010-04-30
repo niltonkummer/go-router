@@ -46,15 +46,8 @@ func newPinger(rot router.Router, done chan<- bool, numRuns int) {
 	//attach chans to router
 	pingChan := make(chan *Msg)
 	pongChan := make(chan *Msg)
-	bindChan := make(chan *router.BindEvent, 1)
-	rot.AttachSendChan(router.StrID("ping"), pingChan, bindChan)
+	rot.AttachSendChan(router.StrID("ping"), pingChan)
 	rot.AttachRecvChan(router.StrID("pong"), pongChan)
-	//wait for ponger connecting
-	for {
-		if (<-bindChan).Count > 0 {
-			break
-		}
-	}
 	//start pinger
 	ping := &Pinger{pingChan, pongChan, done, numRuns}
 	go ping.Run()

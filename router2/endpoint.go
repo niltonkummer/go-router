@@ -62,6 +62,7 @@ type Endpoint struct {
 	Chan       reflectChanValue //external SendChan/RecvChan, attached by clients
 	dispatcher Dispatcher         //current for push dispacher, only sender uses dispatcher
 	bindChan   chan *BindEvent
+	bindCond   chan bool   //simulate a cond var for waiting for recver binding
 	bindLock   sync.Mutex
 	bindings   []*Endpoint //binding_set
 	inDisp     bool        //in a dispatch loop
@@ -75,6 +76,9 @@ func newEndpoint(id Id, t endpointType, ch reflectChanValue, bc chan *BindEvent)
 	endp.Id = id
 	endp.Chan = ch
 	endp.bindChan = bc
+	if t == senderType {
+		endp.bindCond = make(chan bool, 1)
+	}
 	return endp
 }
 
@@ -117,6 +121,13 @@ func (e *Endpoint) senderLoop() {
 		v := e.Chan.Recv()
 		if !e.Chan.Closed() {
 			e.bindLock.Lock()
+			//block here till we have recvers so that message will not be lost
+			for len(e.bindings) == 0 {
+				e.bindLock.Unlock()
+				//wait here until some recver attach
+				<- e.bindCond
+				e.bindLock.Lock()
+			}
 			e.inDisp = true
 			e.bindLock.Unlock()
 			e.dispatcher.Dispatch(v, e.bindings)
@@ -172,6 +183,10 @@ func (e *Endpoint) attachImpl(p *Endpoint) {
 			<-e.bindChan //drop the oldest one
 		}
 	}
+	if len0 == 0 && e.kind == senderType {
+		//fill e.bindCond to notify we have bindings now
+		_ = e.bindCond <- true
+	}
 }
 
 func (e *Endpoint) attach(p *Endpoint) {
@@ -200,10 +215,11 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 					<-e.bindChan //drop the oldest one
 				}
 			}
-			if e.kind == recverType {
-				//for recver, if all senders detached
-				//send EndOfData to notify possible pending goroutine
-				if len(e.bindings) == 0 {
+			if len(e.bindings) == 0 {
+				switch e.kind {
+				case recverType:
+					//for recver, if all senders detached
+					//send EndOfData to notify possible pending goroutine
 					if e.bindChan != nil {
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
@@ -215,6 +231,10 @@ func (e *Endpoint) detachImpl(p *Endpoint) {
 						//close ext chan to notify potential pending goroutine
 						e.Chan.Close()
 					}
+				case senderType:
+					//for sender, if all recver detached
+					//drain e.bindCond so that dispatcher goroutine can wait
+					_ = <-e.bindCond
 				}
 			}
 			return
