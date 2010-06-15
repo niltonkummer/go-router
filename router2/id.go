@@ -76,8 +76,8 @@ type Id interface {
 
 	//Generators for creating other ids of same type. Since often we don't
 	//know the exact types of Id.Val, so we have to create new ones from an existing id
-	SysID(int, ...) (Id, os.Error) //generate sys ids, also called as method of Router
-	Clone(...) (Id, os.Error)      //create a new id with same id, but possible diff scope & membership
+	SysID(int, ...int) (Id, os.Error) //generate sys ids, also called as method of Router
+	Clone(...int) (Id, os.Error)      //create a new id with same id, but possible diff scope & membership
 
 	//Stringer interface
 	String() string
@@ -116,18 +116,14 @@ type IntId struct {
 	MemberVal int
 }
 
-func (id IntId) Clone(args ...) (nnid Id, err os.Error) {
+func (id IntId) Clone(args ...int) (nnid Id, err os.Error) {
 	nid := &IntId{Val: id.Val, ScopeVal: id.ScopeVal, MemberVal: id.MemberVal}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if nid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		nid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if nid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		nid.MemberVal = args[1]
 	}
 	nnid = nid
 	return
@@ -151,22 +147,18 @@ func (id IntId) String() string {
 }
 //define 8 system msg ids
 var IntSysIdBase int = -10101 //Base value for SysIds of IntId
-func (id IntId) SysID(indx int, args ...) (ssid Id, err os.Error) {
+func (id IntId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
 		return
 	}
 	sid := &IntId{Val: (IntSysIdBase - indx)}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if sid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		sid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if sid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		sid.MemberVal = args[1]
 	}
 	ssid = sid
 	return
@@ -179,18 +171,14 @@ type StrId struct {
 	MemberVal int
 }
 
-func (id StrId) Clone(args ...) (nnid Id, err os.Error) {
+func (id StrId) Clone(args ...int) (nnid Id, err os.Error) {
 	nid := &StrId{Val: id.Val, ScopeVal: id.ScopeVal, MemberVal: id.MemberVal}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if nid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		nid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if nid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		nid.MemberVal = args[1]
 	}
 	nnid = nid
 	return
@@ -214,22 +202,18 @@ func (id StrId) String() string {
 }
 //define 8 system msg ids
 var StrSysIdBase string = "-10101" //Base value for SysIds of StrId
-func (id StrId) SysID(indx int, args ...) (ssid Id, err os.Error) {
+func (id StrId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
 		return
 	}
 	sid := &StrId{Val: (StrSysIdBase + strconv.Itoa(indx))}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if sid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		sid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if sid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		sid.MemberVal = args[1]
 	}
 	ssid = sid
 	return
@@ -243,18 +227,14 @@ type PathId struct {
 	MemberVal int
 }
 
-func (id PathId) Clone(args ...) (nnid Id, err os.Error) {
+func (id PathId) Clone(args ...int) (nnid Id, err os.Error) {
 	nid := &PathId{Val: id.Val, ScopeVal: id.ScopeVal, MemberVal: id.MemberVal}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if nid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		nid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if nid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		nid.MemberVal = args[1]
 	}
 	nnid = nid
 	return
@@ -303,22 +283,18 @@ func (id PathId) String() string {
 }
 //define 8 system msg ids
 var PathSysIdBase string = "/10101" //Base value for SysIds of PathId
-func (id PathId) SysID(indx int, args ...) (ssid Id, err os.Error) {
+func (id PathId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
 		return
 	}
 	sid := &PathId{Val: (PathSysIdBase + "/" + strconv.Itoa(indx))}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if sid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		sid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if sid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		sid.MemberVal = args[1]
 	}
 	ssid = sid
 	return
@@ -338,18 +314,14 @@ type MsgId struct {
 	MemberVal int
 }
 
-func (id MsgId) Clone(args ...) (nnid Id, err os.Error) {
+func (id MsgId) Clone(args ...int) (nnid Id, err os.Error) {
 	nid := &MsgId{Val: id.Val, ScopeVal: id.ScopeVal, MemberVal: id.MemberVal}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if nid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		nid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if nid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		nid.MemberVal = args[1]
 	}
 	nnid = nid
 	return
@@ -374,7 +346,7 @@ func (id MsgId) String() string {
 }
 //define 8 system msg ids
 var MsgSysIdBase MsgTag = MsgTag{-10101, -10101} //Base value for SysIds of MsgId
-func (id MsgId) SysID(indx int, args ...) (ssid Id, err os.Error) {
+func (id MsgId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	if indx < 0 || indx >= NumSysInternalIds {
 		err = os.ErrorString(errInvalidSysId)
 		return
@@ -382,16 +354,12 @@ func (id MsgId) SysID(indx int, args ...) (ssid Id, err os.Error) {
 	msgTag := MsgSysIdBase
 	msgTag.Tag -= indx
 	sid := &MsgId{Val: msgTag}
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() > 0 {
-		if sid.ScopeVal, err = parseIdArg(v.Field(0)); err != nil {
-			return
-		}
+	l := len(args)
+	if l > 0 {
+		sid.ScopeVal = args[0]
 	}
-	if v.NumField() > 1 {
-		if sid.MemberVal, err = parseIdArg(v.Field(1)); err != nil {
-			return
-		}
+	if l > 1 {
+		sid.MemberVal = args[1]
 	}
 	ssid = sid
 	return
@@ -413,25 +381,25 @@ var (
     ScopeVal  int
     MemberVal int
 */
-func IntID(args ...) Id {
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() == 0 {
+func IntID(args ...interface{}) Id {
+	l := len(args)
+	if l == 0 {
 		return DummyIntId
 	}
 	id := &IntId{}
 	var err os.Error
-	iv, ok := v.Field(0).(*reflect.IntValue)
+	iv, ok := reflect.NewValue(args[0]).(*reflect.IntValue)
 	if !ok {
 		return nil
 	}
 	id.Val = iv.Get()
-	if v.NumField() > 1 {
-		if id.ScopeVal, err = parseIdArg(v.Field(1)); err != nil {
+	if l > 1 {
+		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
 			return nil
 		}
 	}
-	if v.NumField() > 2 {
-		if id.MemberVal, err = parseIdArg(v.Field(2)); err != nil {
+	if l > 2 {
+		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
 			return nil
 		}
 	}
@@ -444,13 +412,13 @@ func IntID(args ...) Id {
     ScopeVal  int
     MemberVal int
 */
-func StrID(args ...) Id {
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() == 0 {
+func StrID(args ...interface{}) Id {
+	l := len(args)
+	if l == 0 {
 		return DummyStrId
 	}
 	id := &StrId{}
-	sv, ok := v.Field(0).(*reflect.StringValue)
+	sv, ok := reflect.NewValue(args[0]).(*reflect.StringValue)
 	if !ok {
 		return nil
 	}
@@ -459,13 +427,13 @@ func StrID(args ...) Id {
 		return nil
 	}
 	var err os.Error
-	if v.NumField() > 1 {
-		if id.ScopeVal, err = parseIdArg(v.Field(1)); err != nil {
+	if l > 1 {
+		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
 			return nil
 		}
 	}
-	if v.NumField() > 2 {
-		if id.MemberVal, err = parseIdArg(v.Field(2)); err != nil {
+	if l > 2 {
+		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
 			return nil
 		}
 	}
@@ -478,13 +446,13 @@ func StrID(args ...) Id {
     ScopeVal  int
     MemberVal int
 */
-func PathID(args ...) Id {
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() == 0 {
+func PathID(args ...interface{}) Id {
+	l := len(args)
+	if l == 0 {
 		return DummyPathId
 	}
 	id := &PathId{}
-	sv, ok := v.Field(0).(*reflect.StringValue)
+	sv, ok := reflect.NewValue(args[0]).(*reflect.StringValue)
 	if !ok {
 		return nil
 	}
@@ -493,13 +461,13 @@ func PathID(args ...) Id {
 		return nil
 	}
 	var err os.Error
-	if v.NumField() > 1 {
-		if id.ScopeVal, err = parseIdArg(v.Field(1)); err != nil {
+	if l > 1 {
+		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
 			return nil
 		}
 	}
-	if v.NumField() > 2 {
-		if id.MemberVal, err = parseIdArg(v.Field(2)); err != nil {
+	if l > 2 {
+		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
 			return nil
 		}
 	}
@@ -513,42 +481,42 @@ func PathID(args ...) Id {
     ScopeVal  int
     MemberVal int
 */
-func MsgID(args ...) Id {
-	v := reflect.NewValue(args).(*reflect.StructValue)
-	if v.NumField() == 0 {
+func MsgID(args ...interface{}) Id {
+	l := len(args)
+	if l == 0 {
 		return DummyMsgId
 	}
-	if v.NumField() == 1 {
+	if l == 1 {
 		//should have at least 2 ints for family & tag
 		return nil
 	}
 	id := &MsgId{}
-	iv, ok := v.Field(0).(*reflect.IntValue)
+	iv, ok := reflect.NewValue(args[0]).(*reflect.IntValue)
 	if !ok {
 		return nil
 	}
 	id.Val.Family = iv.Get()
-	iv, ok = v.Field(1).(*reflect.IntValue)
+	iv, ok = reflect.NewValue(args[1]).(*reflect.IntValue)
 	if !ok {
 		return nil
 	}
 	id.Val.Tag = iv.Get()
 	var err os.Error
-	if v.NumField() > 2 {
-		if id.ScopeVal, err = parseIdArg(v.Field(2)); err != nil {
+	if l > 2 {
+		if id.ScopeVal, err = parseIdArg(args[2]); err != nil {
 			return nil
 		}
 	}
-	if v.NumField() > 3 {
-		if id.MemberVal, err = parseIdArg(v.Field(3)); err != nil {
+	if l > 3 {
+		if id.MemberVal, err = parseIdArg(args[3]); err != nil {
 			return nil
 		}
 	}
 	return id
 }
 
-func parseIdArg(v reflect.Value) (s int, err os.Error) {
-	if iv, ok := v.(*reflect.IntValue); ok {
+func parseIdArg(v interface{}) (s int, err os.Error) {
+	if iv, ok := reflect.NewValue(v).(*reflect.IntValue); ok {
 		s = iv.Get()
 	} else {
 		err = os.ErrorString(errInvalidId)

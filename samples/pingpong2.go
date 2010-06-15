@@ -79,11 +79,13 @@ func newPonger(rot router.Router, done chan<- bool) {
 	rot.AttachSendChan(router.StrID("pong"), pongChan, bindChan)
 	rot.AttachRecvChan(router.StrID("ping"), pingChan)
 	//wait for pinger connecting
+	/*
 	for {
 		if (<-bindChan).Count > 0 {
 			break
 		}
 	}
+	 */
 	//start ponger
 	pong := &Ponger{pongChan, pingChan, done}
 	go pong.Run()
@@ -102,8 +104,8 @@ func main() {
 	rot := router.New(router.StrID(), 32, router.BroadcastPolicy)
 	done := make(chan bool)
 	//hook up Pinger and Ponger
-	newPinger(rot, done, numRuns)
 	newPonger(rot, done)
+	newPinger(rot, done, numRuns)
 	//wait for ping-pong to finish
 	<-done
 	<-done
