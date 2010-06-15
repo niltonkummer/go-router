@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strconv"
 	"os"
-	"reflect"
 )
 
 //Membership identifies whether communicating peers (send chans and recv chans) are from the same router or diff routers
@@ -387,19 +386,22 @@ func IntID(args ...interface{}) Id {
 		return DummyIntId
 	}
 	id := &IntId{}
-	var err os.Error
-	iv, ok := reflect.NewValue(args[0]).(*reflect.IntValue)
+	iv, ok := args[0].(int)
 	if !ok {
 		return nil
 	}
-	id.Val = iv.Get()
+	id.Val = iv
 	if l > 1 {
-		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
+		if iv, ok = args[1].(int); ok {
+			id.ScopeVal = iv
+		} else {
 			return nil
 		}
 	}
 	if l > 2 {
-		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
+		if iv, ok = args[2].(int); ok {
+			id.MemberVal = iv 
+		} else {
 			return nil
 		}
 	}
@@ -418,22 +420,25 @@ func StrID(args ...interface{}) Id {
 		return DummyStrId
 	}
 	id := &StrId{}
-	sv, ok := reflect.NewValue(args[0]).(*reflect.StringValue)
+	sv, ok :=args[0].(string)
 	if !ok {
 		return nil
 	}
-	id.Val = sv.Get()
+	id.Val = sv
 	if len(id.Val) == 0 {
 		return nil
 	}
-	var err os.Error
 	if l > 1 {
-		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
+		if iv, ok := args[1].(int); ok {
+			id.ScopeVal = iv
+		} else {
 			return nil
 		}
 	}
 	if l > 2 {
-		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
+		if iv, ok := args[2].(int); ok {
+			id.MemberVal = iv 
+		} else {
 			return nil
 		}
 	}
@@ -452,22 +457,25 @@ func PathID(args ...interface{}) Id {
 		return DummyPathId
 	}
 	id := &PathId{}
-	sv, ok := reflect.NewValue(args[0]).(*reflect.StringValue)
+	sv, ok := args[0].(string)
 	if !ok {
 		return nil
 	}
-	id.Val = sv.Get()
+	id.Val = sv
 	if len(id.Val) == 0 || id.Val[0] != '/' {
 		return nil
 	}
-	var err os.Error
 	if l > 1 {
-		if id.ScopeVal, err = parseIdArg(args[1]); err != nil {
+		if iv, ok := args[1].(int); ok {
+			id.ScopeVal = iv
+		} else {
 			return nil
 		}
 	}
 	if l > 2 {
-		if id.MemberVal, err = parseIdArg(args[2]); err != nil {
+		if iv, ok := args[2].(int); ok {
+			id.MemberVal = iv 
+		} else {
 			return nil
 		}
 	}
@@ -491,39 +499,32 @@ func MsgID(args ...interface{}) Id {
 		return nil
 	}
 	id := &MsgId{}
-	iv, ok := reflect.NewValue(args[0]).(*reflect.IntValue)
+	iv, ok := args[0].(int)
 	if !ok {
 		return nil
 	}
-	id.Val.Family = iv.Get()
-	iv, ok = reflect.NewValue(args[1]).(*reflect.IntValue)
+	id.Val.Family = iv
+	iv, ok = args[1].(int)
 	if !ok {
 		return nil
 	}
-	id.Val.Tag = iv.Get()
-	var err os.Error
+	id.Val.Tag = iv
 	if l > 2 {
-		if id.ScopeVal, err = parseIdArg(args[2]); err != nil {
+		if iv, ok = args[2].(int); ok {
+			id.ScopeVal = iv
+		} else {
 			return nil
 		}
 	}
 	if l > 3 {
-		if id.MemberVal, err = parseIdArg(args[3]); err != nil {
+		if iv, ok = args[3].(int); ok {
+			id.MemberVal = iv 
+		} else {
 			return nil
 		}
 	}
 	return id
 }
-
-func parseIdArg(v interface{}) (s int, err os.Error) {
-	if iv, ok := reflect.NewValue(v).(*reflect.IntValue); ok {
-		s = iv.Get()
-	} else {
-		err = os.ErrorString(errInvalidId)
-	}
-	return
-}
-
 
 // for scope checking
 

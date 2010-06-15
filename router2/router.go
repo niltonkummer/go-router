@@ -204,18 +204,10 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (
 	}
 	l := len(args)
 	var bindChan chan *BindEvent
-	var ok bool
 	if l > 0 {
-		switch cv := reflect.NewValue(args[0]).(type) {
-		case *reflect.ChanValue:
-			icv := cv.Interface()
-			bindChan, ok = icv.(chan *BindEvent)
-			if !ok {
-				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
-				s.LogError(err)
-				s.Raise(err)
-				return
-			}
+		switch cv := args[0].(type) {
+		case chan *BindEvent:
+			bindChan = cv
 			if cap(bindChan) == 0 {
 				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 				s.LogError(err)
@@ -223,7 +215,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (
 				return
 			}
 		default:
-			err = os.ErrorString("invalid arguments to attach chan")
+			err = os.ErrorString("invalid arguments to attach send chan")
 			s.LogError(err)
 			s.Raise(err)
 			return
@@ -259,16 +251,9 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (
 	l := len(args)
 	var bindChan chan *BindEvent
 	if l > 0 {
-		switch cv := reflect.NewValue(args[0]).(type) {
-		case *reflect.ChanValue:
-			icv := cv.Interface()
-			bindChan, ok = icv.(chan *BindEvent)
-			if !ok {
-				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
-				s.LogError(err)
-				s.Raise(err)
-				return
-			}
+		switch cv := args[0].(type) {
+		case chan *BindEvent:
+			bindChan = cv
 			if cap(bindChan) == 0 {
 				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 				s.LogError(err)
@@ -643,17 +628,17 @@ func New(seedId Id, bufSize int, disp DispatchPolicy, args ...interface{}) Route
 	consoleLogScope := -1
 	l := len(args)
 	if l > 0 {
-		if sv, ok := reflect.NewValue(args[0]).(*reflect.StringValue); !ok {
+		if sv, ok := args[0].(string); !ok {
 			return nil
 		} else {
-			name = sv.Get()
+			name = sv
 		}
 	}
 	if l > 1 {
-		if iv, ok := reflect.NewValue(args[1]).(*reflect.IntValue); !ok {
+		if iv, ok := args[1].(int); !ok {
 			return nil
 		} else {
-			consoleLogScope = iv.Get()
+			consoleLogScope = iv
 			if consoleLogScope < ScopeGlobal || consoleLogScope > ScopeLocal {
 				return nil
 			}
