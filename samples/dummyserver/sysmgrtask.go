@@ -108,7 +108,7 @@ func (smt *SysMgrTask) Run(r router.Router, n string, role ServantRole) {
 			if !closed(smt.pubChan) {
 				for _, v := range pub.Info {
 					id := v.Id.(*router.StrId)
-					data := strings.Split(id.Val, "/", 0)
+					data := strings.Split(id.Val, "/", -1)
 					if data[1] == "App" {
 						smt.sysCmdChan <- fmt.Sprintf("AddService:%s", data[2])
 						fmt.Printf("%s AddService:%s\n", smt.name, data[2])
@@ -123,7 +123,7 @@ func (smt *SysMgrTask) Run(r router.Router, n string, role ServantRole) {
 			if !closed(smt.unpubChan) {
 				for _, v := range unpub.Info {
 					id := v.Id.(*router.StrId)
-					data := strings.Split(id.Val, "/", 0)
+					data := strings.Split(id.Val, "/", -1)
 					if data[1] == "App" {
 						smt.sysCmdChan <- fmt.Sprintf("DelService:%s", data[2])
 						fmt.Printf("%s DelService:%s\n", smt.name, data[2])
