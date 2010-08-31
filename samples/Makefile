@@ -1,7 +1,7 @@
 # prerequisite: GOROOT and GOARCH must be defined
 
 # defines $(GC) (compiler), $(LD) (linker) and $(O) (architecture)
-include $(GOROOT)/src/Make.$(GOARCH)
+include $(GOROOT)/src/Make.inc
 
 # default use router1 for samples, choose router2 by "make VERSION=router2"
 VERSION=router1
