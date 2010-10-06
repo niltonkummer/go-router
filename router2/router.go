@@ -113,7 +113,7 @@ type routerImpl struct {
 }
 
 func (s *routerImpl) NewSysID(idx int, args ...int) Id {
-	sid, err := s.seedId.SysID(idx, args)
+	sid, err := s.seedId.SysID(idx, args...)
 	if err != nil {
 		s.LogError(err)
 		return nil
