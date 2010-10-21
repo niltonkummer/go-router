@@ -39,7 +39,6 @@ const (
 	DefDataChanBufSize = 32
 	DefCmdChanBufSize  = 64
 	DefBindingSetSize  = 8
-	DefCountBeforeGC   = 16
 )
 
 //Router is the main access point to functionality. Applications will create an instance
@@ -51,8 +50,8 @@ type Router interface {
 	//When specified, the optional argument will serve two purposes:
 	//1. used to tell when other ends connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
-	AttachSendChan(Id, interface{}, ...) os.Error
-	AttachRecvChan(Id, interface{}, ...) os.Error
+	AttachSendChan(Id, interface{}, ...interface{}) os.Error
+	AttachRecvChan(Id, interface{}, ...interface{}) os.Error
 
 	//Detach sendChan/recvChan from router
 	DetachChan(Id, interface{}) os.Error
@@ -68,14 +67,14 @@ type Router interface {
 	Connect(Router) (Proxy, Proxy, os.Error)
 
 	//Connect to a remote router thru io conn
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy) (Proxy, os.Error)
 
 	//--- other utils ---
 	//return pre-created SysIds according to the router's id-type, with ScopeGlobal / MemberLocal
 	SysID(idx int) Id
 
 	//create a new SysId with "args..." specifying scope/membership
-	NewSysID(idx int, args ...) Id
+	NewSysID(idx int, args ...int) Id
 
 	//return all ids and their ChanTypes from router's namespace which satisfy predicate
 	IdsForSend(predicate func(id Id) bool) map[interface{}]*IdChanInfo
@@ -93,7 +92,6 @@ const (
 	addProxy
 	delProxy
 	shutdown
-	GC         //kludge for issue #536
 )
 
 type command struct {
@@ -131,8 +129,8 @@ type routerImpl struct {
 	name string
 }
 
-func (s *routerImpl) NewSysID(idx int, args ...) Id {
-	sid, err := s.seedId.SysID(idx, args)
+func (s *routerImpl) NewSysID(idx int, args ...int) Id {
+	sid, err := s.seedId.SysID(idx, args...)
 	if err != nil {
 		s.LogError(err)
 		return nil
@@ -205,9 +203,8 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 	return
 }
 
-func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
-	ok := false
-	ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+func validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
+	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errInvalidChan)
 		return
@@ -219,7 +216,7 @@ func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.
 	case *reflect.FloatType:
 	case *reflect.StringType:
 	case *reflect.PtrType:
-		if _, ok1 := et.Elem().(*reflect.StructType); !ok1 {
+		if _, ok = et.Elem().(*reflect.StructType); !ok {
 			err = os.ErrorString(errInvalidChan)
 			return
 		}
@@ -230,32 +227,24 @@ func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.
 	return
 }
 
-func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Error) {
+func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	ch, err := validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
-	av := reflect.NewValue(args).(*reflect.StructValue)
+	l := len(args)
 	var bindChan chan *BindEvent
-	var ok bool
-	if av.NumField() > 0 {
-		switch cv := av.Field(0).(type) {
-		case *reflect.ChanValue:
-			icv := cv.Interface()
-			bindChan, ok = icv.(chan *BindEvent)
-			if !ok {
-				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
-				s.LogError(err)
-				s.Raise(err)
-				return
-			}
+	if l > 0 {
+		switch cv := args[0].(type) {
+		case chan *BindEvent:
+			bindChan = cv
 			if cap(bindChan) == 0 {
 				err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 				s.LogError(err)
@@ -263,7 +252,7 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 				return
 			}
 		default:
-			err = os.ErrorString("invalid arguments to attach chan")
+			err = os.ErrorString("invalid arguments to attach send chan")
 			s.LogError(err)
 			s.Raise(err)
 			return
@@ -279,8 +268,8 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	cmd = <-cmd.rspChan //wait for response from router
 	if cmd.error != nil {
 		err = cmd.error
-		s.Raise(err)
 		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	//now we are attached successfully, start forwarding
@@ -299,41 +288,34 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...) (err os.Erro
 	return nil
 }
 
-func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Error) {
+func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	ch, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	ch, err := validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
-	av := reflect.NewValue(args).(*reflect.StructValue)
+	l := len(args)
 	var bindChan chan *BindEvent
 	var ok, flag bool //a flag to mark if we close ext chan when EndOfData even if bindChan exist
-	if av.NumField() > 0 {
-		for i := 0; i < av.NumField(); i++ {
-			switch cv := av.Field(i).(type) {
-			case *reflect.ChanValue:
-				icv := cv.Interface()
-				bindChan, ok = icv.(chan *BindEvent)
-				if !ok {
-					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not chan *BindEvent")
-					s.LogError(err)
-					s.Raise(err)
-					return
-				}
+	if l > 0 {
+		for i := 0; i < l; i++ {
+			switch cv := args[i].(type) {
+			case chan *BindEvent:
+				bindChan = cv
 				if cap(bindChan) == 0 {
 					err = os.ErrorString(errInvalidBindChan + ": binding bindChan is not buffered")
 					s.LogError(err)
 					s.Raise(err)
 					return
 				}
-			case *reflect.BoolValue:
-				flag = cv.Get()
+			case bool:
+				flag = cv
 			default:
 				err = os.ErrorString("invalid arguments to attach recv chan")
 				s.LogError(err)
@@ -362,7 +344,7 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...) (err os.Erro
 		for cont {
 			v := <-endp.Chan
 			if !closed(endp.Chan) {
-				if _, ok1 := v.(chanCloseMsg); ok1 {
+				if _, ok = v.(chanCloseMsg); ok {
 					if endp.bindChan != nil {
 						//if bindChan exist, user is monitoring bind status
 						//send EndOfData event and normally leave ext chan "ch" open
@@ -397,10 +379,10 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	cv, err1 := s.validateChan(v)
-	if err1 != nil {
-		s.LogError(err1)
-		s.Raise(err1)
+	cv, err := validateChan(v)
+	if err != nil {
+		s.LogError(err)
+		s.Raise(err)
 		return
 	}
 	endp := &Endpoint{}
@@ -531,7 +513,6 @@ func (s *routerImpl) attach(cmd *command) {
 				if scope_match(sender.Id, endp.Id) {
 					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
 					if idx >= PubId && idx < NumSysIds && len(sender.bindings) == 0 { //sys Pub/Sub ids
-						//s.LogError("enable for ", sender.Id);
 						s.notifier.setFlag(sender.Id, idx, true)
 					}
 					matches.Push(sender)
@@ -776,7 +757,7 @@ func (r1 *routerImpl) Connect(r2 Router) (p1, p2 Proxy, err os.Error) {
 	return
 }
 
-func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshallingPolicy) (p Proxy, err os.Error) {
+func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy) (p Proxy, err os.Error) {
 	p = NewProxy(r, "", nil, nil)
 	err = p.ConnectRemote(rwc, mar)
 	return
@@ -795,23 +776,23 @@ New is router constructor. It accepts the following arguments:
                       if logScope == ScopeLocal, only log msgs from local router will show up
                       if logScope == ScopeGlobal, all log msgs from connected routers will show up
 */
-func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router {
+func New(seedId Id, bufSize int, disp DispatchPolicy, args ...interface{}) Router {
 	//parse optional router name and flag for enable console logging
 	var name string
 	consoleLogScope := -1
-	av := reflect.NewValue(args).(*reflect.StructValue)
-	if av.NumField() > 0 {
-		if sv, ok := av.Field(0).(*reflect.StringValue); !ok {
+	l := len(args)
+	if l > 0 {
+		if sv, ok := args[0].(string); !ok {
 			return nil
 		} else {
-			name = sv.Get()
+			name = sv
 		}
 	}
-	if av.NumField() > 1 {
-		if iv, ok := av.Field(1).(*reflect.IntValue); !ok {
+	if l > 1 {
+		if iv, ok := args[1].(int); !ok {
 			return nil
 		} else {
-			consoleLogScope = iv.Get()
+			consoleLogScope = iv
 			if consoleLogScope < ScopeGlobal || consoleLogScope > ScopeLocal {
 				return nil
 			}

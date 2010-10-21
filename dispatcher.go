@@ -58,7 +58,7 @@ func KeepLatestBroadcast(v interface{}, recvers []*Endpoint) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			for !(rc.Chan <- v) {
-				<- rc.Chan
+				<-rc.Chan
 			}
 		}
 	}

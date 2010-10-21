@@ -26,9 +26,13 @@ type stream struct {
 	Logger
 	FaultRaiser
 	Closed bool
+	ptrBool *reflect.PtrValue
+	ptrInt *reflect.PtrValue
+	ptrFloat *reflect.PtrValue
+	ptrString *reflect.PtrValue
 }
 
-func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stream {
+func newStream(rwc io.ReadWriteCloser, mp MarshalingPolicy, p *proxyImpl) *stream {
 	s := new(stream)
 	s.proxy = p
 	//create export chans
@@ -52,10 +56,18 @@ func newStream(rwc io.ReadWriteCloser, mp MarshallingPolicy, p *proxyImpl) *stre
 	}
 	s.Logger.Init(p.router.SysID(RouterLogId), p.router, ln)
 	s.FaultRaiser.Init(p.router.SysID(RouterFaultId), p.router, ln)
+	var xb *bool = nil
+	s.ptrBool = reflect.NewValue(xb).(*reflect.PtrValue)
+	var xi *int = nil
+	s.ptrInt = reflect.NewValue(xi).(*reflect.PtrValue)
+	var xf *float = nil
+	s.ptrFloat = reflect.NewValue(xf).(*reflect.PtrValue)
+	var xs *string = nil
+	s.ptrString = reflect.NewValue(xs).(*reflect.PtrValue)
 	return s
 }
 
-func (s *stream) Start() {
+func (s *stream) start() {
 	go s.outputMainLoop()
 	go s.inputMainLoop()
 }
@@ -108,57 +120,42 @@ func (s *stream) send(m *genericMsg, appMsg bool) (err os.Error) {
 			return
 		}
 	}
-	s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", m.Id))
+	//s.Log(LOG_INFO, fmt.Sprintf("output send one msg for id %v", m.Id))
 	return
 }
 
 //read data from importConnChan/importPubSubChan/importAppDataChan and send them to io.Writer
 func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop start")
-	//kludge for issue#536, merge data streams into one chan
-	go func() {
-		for {
-			m := <- s.importConnChan
-			if closed(s.importConnChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
-	go func() {
-		for {
-			m := <- s.importPubSubChan
-			if closed(s.importPubSubChan) {
-				break
-			}
-			s.importAppDataChan <- m
-		}
-	}()
 	//
 	proxyDisconn := false
 	cont := true
-	count := 0
 	for cont {
 		select {
 		case cmd := <-s.myCmdChan:
 			if cmd == peerClose {
 				cont = false
 			}
-		case m := <-s.importAppDataChan:
-			if !closed(s.importAppDataChan) {
-				if err := s.send(m, true); err != nil {
+		case m := <-s.importConnChan:
+			if !closed(s.importConnChan) {
+				if err := s.send(m, false); err != nil {
 					cont = false
 				}
 				if m.Id.Match(s.proxy.router.SysID(RouterDisconnId)) {
 					proxyDisconn = true
 					cont = false
 				}
-				//kludge for issue#536
-				count++
-				if count > DefCountBeforeGC {
-					count = 0
-					//make this nonblocking since it is fine as long as something inside cmdChan
-					_ = s.myCmdChan <- peerGC
+			}
+		case m := <-s.importPubSubChan:
+			if !closed(s.importPubSubChan) {
+				if err := s.send(m, false); err != nil {
+					cont = false
+				}
+			}
+		case m := <-s.importAppDataChan:
+			if !closed(s.importAppDataChan) {
+				if err := s.send(m, true); err != nil {
+					cont = false
 				}
 			}
 		}
@@ -172,7 +169,7 @@ func (s *stream) outputMainLoop() {
 	s.Log(LOG_INFO, "outputMainLoop exit")
 }
 
-//read data from io.Reader and pass them to exportConnChan/exportPubSubChan/exportAppDataChan
+//read data from io.Reader, pass ctrlMsg to exportCtrlChan and dataMsg to peer
 func (s *stream) inputMainLoop() {
 	s.Log(LOG_INFO, "inputMainLoop start")
 	cont := true
@@ -191,7 +188,7 @@ func (s *stream) inputMainLoop() {
 func (s *stream) recv() (err os.Error) {
 	r := s.proxy.router
 	id, _ := r.seedId.Clone()
-	if err = s.demar.Demarshal(id, nil); err != nil {
+	if err = s.demar.Demarshal(id); err != nil {
 		s.LogError(err)
 		//s.Raise(err)
 		return
@@ -206,7 +203,7 @@ func (s *stream) recv() (err os.Error) {
 	case id.Match(r.SysID(ConnReadyId)):
 		idc, _ := r.seedId.Clone()
 		cim := &ConnInfoMsg{SeedId: idc}
-		if err = s.demar.Demarshal(cim, nil); err != nil {
+		if err = s.demar.Demarshal(cim); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
@@ -221,7 +218,7 @@ func (s *stream) recv() (err os.Error) {
 	case id.Match(r.SysID(UnSubId)):
 		idc, _ := r.seedId.Clone()
 		icm := &IdChanInfoMsg{[]*IdChanInfo{&IdChanInfo{idc, nil, nil}}}
-		if err = s.demar.Demarshal(icm, nil); err != nil {
+		if err = s.demar.Demarshal(icm); err != nil {
 			s.LogError(err)
 			//s.Raise(err)
 			return
@@ -238,14 +235,33 @@ func (s *stream) recv() (err os.Error) {
 				s.Raise(os.ErrorString(errStr))
 				return
 			}
-			val := reflect.MakeZero(chanType.Elem())
-			ptrT, ok := chanType.Elem().(*reflect.PtrType)
-			if ok {
-				sto := reflect.MakeZero(ptrT.Elem())
-				val = reflect.MakeZero(ptrT)
-				val.(*reflect.PtrValue).PointTo(sto)
+			et := chanType.Elem()
+			val := reflect.MakeZero(et)
+			var ptrT *reflect.PtrValue
+			switch et := et.(type) {
+			case *reflect.BoolType:
+				ptrT = s.ptrBool
+				ptrT.PointTo(val)
+			case *reflect.IntType:
+				ptrT = s.ptrInt
+				ptrT.PointTo(val)
+			case *reflect.FloatType:
+				ptrT = s.ptrFloat
+				ptrT.PointTo(val)
+			case *reflect.StringType:
+				ptrT = s.ptrString
+				ptrT.PointTo(val)
+			case *reflect.PtrType:
+				sto := reflect.MakeZero(et.Elem())
+				ptrT = val.(*reflect.PtrValue)
+				ptrT.PointTo(sto)
+			default:
+				errStr := fmt.Sprintf("invalid chanType for id %v", id)
+				s.Log(LOG_ERROR, errStr)
+				s.Raise(os.ErrorString(errStr))
+				return
 			}
-			if err = s.demar.Demarshal(val.Interface(), val); err != nil {
+			if err = s.demar.Demarshal(ptrT.Interface()); err != nil {
 				s.LogError(err)
 				//s.Raise(err)
 				return
@@ -253,6 +269,6 @@ func (s *stream) recv() (err os.Error) {
 			s.exportAppDataChan <- &genericMsg{id, val.Interface()}
 		}
 	}
-	s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))
+	//s.Log(LOG_INFO, fmt.Sprintf("input recv one msg for id %v", id))
 	return
 }

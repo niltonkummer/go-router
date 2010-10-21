@@ -81,7 +81,7 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 	logger.logChan = make(chan *LogRecord, bufSize)
 	err := logger.router.AttachSendChan(id, logger.logChan, logger.bindEvtChan)
 	if err != nil {
-		log.Crash("failed to add logger for ", logger.source)
+		log.Panicln("failed to add logger for ", logger.source)
 		return nil
 	}
 	return logger
@@ -183,7 +183,7 @@ func (l *LogSink) Close() {
 func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
 	err := r.AttachRecvChan(logId, l.sinkChan)
 	if err != nil {
-		log.Stderr("*** failed to enable router's console log sink ***")
+		log.Println("*** failed to enable router's console log sink ***")
 		return
 	}
 	go func() {
@@ -205,17 +205,17 @@ func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
 			case LOG_ERROR:
 				fallthrough
 			case LOG_WARN:
-				//log.Stderrf("[%s %v %v] %v", lr.Source, lr.Pri, ts, lr.Info);
-				log.Stderrf("[%s %v] %v", lr.Source, lr.Pri, lr.Info)
+				//log.Printf("[%s %v %v] %v", lr.Source, lr.Pri, ts, lr.Info);
+				log.Printf("[%s %v] %v", lr.Source, lr.Pri, lr.Info)
 			case LOG_DEBUG:
 				fallthrough
 			case LOG_INFO:
-				//log.Stdoutf("[%s %v %v] %v", lr.Source, lr.Pri, ts, lr.Info);
-				log.Stdoutf("[%s %v] %v", lr.Source, lr.Pri, lr.Info)
+				//log.Printf("[%s %v %v] %v", lr.Source, lr.Pri, ts, lr.Info);
+				log.Printf("[%s %v] %v", lr.Source, lr.Pri, lr.Info)
 			}
 		}
 		l.sinkExit <- true
-		log.Stderr("console log goroutine exits")
+		log.Println("console log goroutine exits")
 	}()
 	//err = r.DetachChan(logId, l.sinkChan);
 }
@@ -248,7 +248,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 	faultRaiser.faultChan = make(chan *FaultRecord, bufSize)
 	err := faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan, faultRaiser.bindEvtChan)
 	if err != nil {
-		log.Stderr("failed to add faultRaiser for [%v, %v]", faultRaiser.source, id)
+		log.Println("failed to add faultRaiser for [%v, %v]", faultRaiser.source, id)
 		return nil
 	}
 	//log.Stdout("add faultRaiser for ", faultRaiser.source);
@@ -267,7 +267,7 @@ func (l *faultRaiser) raise(msg os.Error) {
 
 	if !l.caught {
 		//l.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
-		log.Crashf("Crash at %v", msg)
+		log.Panicf("Crash at %v", msg)
 		return
 	}
 
@@ -313,6 +313,6 @@ func (r *FaultRaiser) Raise(msg os.Error) {
 		r.faultRaiser.raise(msg)
 	} else {
 		//r.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
-		log.Crashf("Crash at %v", msg)
+		log.Panicf("Crash at %v", msg)
 	}
 }
