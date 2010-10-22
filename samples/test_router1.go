@@ -8,7 +8,7 @@ package main
 
 import (
 	"fmt"
-	"go-router.googlecode.com/svn/trunk/router1"
+	"go-router.googlecode.com/svn/trunk"
 	"strings"
 	"net"
 )
