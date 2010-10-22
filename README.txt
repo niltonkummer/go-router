@@ -1,6 +1,6 @@
 There are two implementations of "router" package; both provide the same user API.
 
-trunk/router1:
+branches/router1:
 . strictly follow Go's idea of "Do not communicate by sharing memory; 
            instead, share memory by communicating."
 . avoid directly sharing memory among goroutines (thus avoid locks/mutex); 
@@ -36,7 +36,7 @@ user	0m28.570s
 sys	0m21.261s
 
 
-trunk/router2:
+trunk (router2):
 . directly share memory among various goroutines for better efficiency, shared
   memory are protected by sync.Mutex
 . router's routing-table, endpoint's binding_set, and proxy's RecvChanBundle and
