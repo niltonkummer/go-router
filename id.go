@@ -76,6 +76,7 @@ type Id interface {
 	//Generators for creating other ids of same type. Since often we don't
 	//know the exact types of Id.Val, so we have to create new ones from an existing id
 	SysID(int, ...int) (Id, os.Error) //generate sys ids, also called as method of Router
+	SysIdIndex() int //return (0 - NumSysInternalIds) for SysIds, return -1 for others
 	Clone(...int) (Id, os.Error)      //create a new id with same id, but possible diff scope & membership
 
 	//Stringer interface
@@ -162,6 +163,13 @@ func (id IntId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	ssid = sid
 	return
 }
+func (id IntId) SysIdIndex() int {
+	idx := IntSysIdBase - id.Val
+	if idx >= 0 && idx < NumSysInternalIds {
+		return idx
+	}
+	return -1
+}
 
 //Use strings as ids in router
 type StrId struct {
@@ -216,6 +224,15 @@ func (id StrId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	}
 	ssid = sid
 	return
+}
+func (id StrId) SysIdIndex() int {
+	if len(id.Val) >= 7 && StrSysIdBase == id.Val[0:6] {
+		idx := int(id.Val[6] - '0') //strconv.Atoi(id.Val[6:])
+		if idx >= 0 && idx < NumSysInternalIds {
+			return idx
+		}
+	}
+	return -1
 }
 
 //Use file-system like pathname as ids
@@ -298,6 +315,15 @@ func (id PathId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	ssid = sid
 	return
 }
+func (id PathId) SysIdIndex() int {
+	if len(id.Val) >= 8 && PathSysIdBase == id.Val[0:6] {
+		idx := int(id.Val[7] - '0') //strconv.Atoi(id.Val[7:])
+		if idx >= 0 && idx < NumSysInternalIds {
+			return idx
+		}
+	}
+	return -1
+}
 
 //Use a common msgTag as Id
 type MsgTag struct {
@@ -362,6 +388,15 @@ func (id MsgId) SysID(indx int, args ...int) (ssid Id, err os.Error) {
 	}
 	ssid = sid
 	return
+}
+func (id MsgId) SysIdIndex() int {
+	if id.Val.Family == -10101 {
+		idx := -10101 - id.Val.Tag
+		if idx >= 0 && idx < NumSysInternalIds {
+			return idx
+		}
+	}
+	return -1
 }
 
 //Various Id constructors

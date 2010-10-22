@@ -21,8 +21,8 @@ type Msg struct {
 //pinger: send to ping chan, recv from pong chan
 type Pinger struct {
 	//Pinger's public interface
-	pingChan chan<- *Msg
-	pongChan <-chan *Msg
+	pingChan chan<- Msg
+	pongChan <-chan Msg
 	done     chan<- bool
 	//Pinger's private state
 	numRuns int //how many times should we ping-pong
@@ -36,7 +36,7 @@ func (p *Pinger) Run() {
 		if v.Count > p.numRuns {
 			break
 		}
-		p.pingChan <- &Msg{"hello from Pinger", v.Count+1}
+		p.pingChan <- Msg{"hello from Pinger", v.Count+1}
 	}
 	close(p.pingChan)
 	p.done <- true
@@ -44,8 +44,8 @@ func (p *Pinger) Run() {
 
 func newPinger(rot router.Router, done chan<- bool, numRuns int) {
 	//attach chans to router
-	pingChan := make(chan *Msg)
-	pongChan := make(chan *Msg)
+	pingChan := make(chan Msg)
+	pongChan := make(chan Msg)
 	rot.AttachSendChan(router.StrID("ping"), pingChan)
 	rot.AttachRecvChan(router.StrID("pong"), pongChan)
 	//start pinger
@@ -56,19 +56,19 @@ func newPinger(rot router.Router, done chan<- bool, numRuns int) {
 //ponger: send to pong chan, recv from ping chan
 type Ponger struct {
 	//Ponger's public interface
-	pongChan chan<- *Msg
-	pingChan <-chan *Msg
+	pongChan chan<- Msg
+	pingChan <-chan Msg
 	done     chan<- bool
 	//Ponger's private state
 }
 
 func (p *Ponger) Run() {
-	p.pongChan <- &Msg{"hello from Ponger", 0}  //initiate ping-pong
+	p.pongChan <- Msg{"hello from Ponger", 0}  //initiate ping-pong
 	for v := range p.pingChan {
 		if showPingPong {
 			fmt.Println("Ponger recv: ", v)
 		}
-		p.pongChan <- &Msg{"hello from Ponger", v.Count+1}
+		p.pongChan <- Msg{"hello from Ponger", v.Count+1}
 	}
 	close(p.pongChan)
 	p.done <- true
@@ -76,8 +76,8 @@ func (p *Ponger) Run() {
 
 func newPonger(rot router.Router, done chan<- bool) {
 	//attach chans to router
-	pingChan := make(chan *Msg)
-	pongChan := make(chan *Msg)
+	pingChan := make(chan Msg)
+	pongChan := make(chan Msg)
 	bindChan := make(chan *router.BindEvent, 1)
 	rot.AttachSendChan(router.StrID("pong"), pongChan, bindChan)
 	rot.AttachRecvChan(router.StrID("ping"), pingChan)

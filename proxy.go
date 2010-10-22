@@ -156,8 +156,8 @@ func (p *proxyImpl) connSetup() os.Error {
 	//1. to initiate conn setup handshaking, send my conn info to peer
 	p.peer.sendCtrlMsg(&genericMsg{r.SysID(RouterConnId), &ConnInfoMsg{SeedId: p.router.seedId}})
 	//2. recv connInfo from peer
-	switch m := <-p.ctrlChan; {
-	case m.Id.Match(r.SysID(RouterConnId)):
+	switch m := <-p.ctrlChan; m.Id.SysIdIndex() {
+	case RouterConnId:
 		//save peer conninfo & forward it
 		ci := m.Data.(*ConnInfoMsg)
 		p.sysChans.SendConnInfo(RouterConnId, ci)
@@ -186,16 +186,16 @@ func (p *proxyImpl) connSetup() os.Error {
 	peerReady := false
 	myReady := false
 	for !(peerReady && myReady) {
-		switch m := <-p.ctrlChan; {
-		case m.Id.Match(r.SysID(ConnReadyId)):
+		switch m := <-p.ctrlChan; m.Id.SysIdIndex() {
+		case ConnReadyId:
 			p.sysChans.SendConnInfo(ConnReadyId, m.Data.(*ConnInfoMsg))
 			peerReady = true
-		case m.Id.Match(r.SysID(ConnErrorId)):
+		case ConnErrorId:
 			ci := m.Data.(*ConnInfoMsg)
 			p.sysChans.SendConnInfo(ConnErrorId, ci)
 			p.LogError(ci.Error)
 			return ci.Error
-		case m.Id.Match(r.SysID(PubId)):
+		case PubId:
 			_, err := p.handlePeerPubMsg(m)
 			p.sysChans.SendPubSubInfo(PubId, m.Data.(*IdChanInfoMsg))
 			if err != nil {
@@ -204,7 +204,7 @@ func (p *proxyImpl) connSetup() os.Error {
 				p.LogError(err)
 				return err
 			}
-		case m.Id.Match(r.SysID(SubId)):
+		case SubId:
 			_, err := p.handlePeerSubMsg(m)
 			p.sysChans.SendPubSubInfo(SubId, m.Data.(*IdChanInfoMsg))
 			if err != nil {
@@ -258,14 +258,14 @@ func (p *proxyImpl) ctrlMainLoop() {
 				cont = false
 				break
 			}
-			switch {
-			case m.Id.Match(r.SysID(PubId)):
+			switch m.Id.SysIdIndex() {
+			case PubId:
 				_, err = p.handleLocalPubMsg(m)
-			case m.Id.Match(r.SysID(UnPubId)):
+			case UnPubId:
 				_, err = p.handleLocalUnPubMsg(m)
-			case m.Id.Match(r.SysID(SubId)):
+			case SubId:
 				_, err = p.handleLocalSubMsg(m)
-			case m.Id.Match(r.SysID(UnSubId)):
+			case UnSubId:
 				_, err = p.handleLocalUnSubMsg(m)
 			}
 			if err != nil {
@@ -284,26 +284,26 @@ func (p *proxyImpl) ctrlMainLoop() {
 				cont = false
 				break
 			}
-			switch {
-			case m.Id.Match(r.SysID(RouterDisconnId)):
+			switch m.Id.SysIdIndex() {
+			case RouterDisconnId:
 				p.sysChans.SendConnInfo(RouterDisconnId, m.Data.(*ConnInfoMsg))
 				p.Log(LOG_INFO, "recv Disconn msg, proxy shutdown")
 				cont = false
-			case m.Id.Match(r.SysID(ConnErrorId)):
+			case ConnErrorId:
 				ci := m.Data.(*ConnInfoMsg)
 				p.sysChans.SendConnInfo(ConnErrorId, ci)
 				p.LogError(ci.Error)
 				cont = false
-			case m.Id.Match(r.SysID(PubId)):
+			case PubId:
 				_, err = p.handlePeerPubMsg(m)
 				p.sysChans.SendPubSubInfo(PubId, m.Data.(*IdChanInfoMsg))
-			case m.Id.Match(r.SysID(UnPubId)):
+			case UnPubId:
 				_, err = p.handlePeerUnPubMsg(m)
 				p.sysChans.SendPubSubInfo(UnPubId, m.Data.(*IdChanInfoMsg))
-			case m.Id.Match(r.SysID(SubId)):
+			case SubId:
 				_, err = p.handlePeerSubMsg(m)
 				p.sysChans.SendPubSubInfo(SubId, m.Data.(*IdChanInfoMsg))
-			case m.Id.Match(r.SysID(UnSubId)):
+			case UnSubId:
 				_, err = p.handlePeerUnSubMsg(m)
 				p.sysChans.SendPubSubInfo(UnSubId, m.Data.(*IdChanInfoMsg))
 			}
@@ -989,7 +989,7 @@ func (sc *sysChans) SendPubSubInfo(idx int, data *IdChanInfoMsg) {
 			info := make([]*IdChanInfo, len(data.Info))
 			num := 0
 			for i := 0; i < len(data.Info); i++ {
-				if sc.proxy.router.getSysInternalIdIdx(data.Info[i].Id) < 0 {
+				if data.Info[i].Id.SysIdIndex() < 0 {
 					info[num] = data.Info[i]
 					num++
 				}

@@ -62,5 +62,3 @@ type BindEvent struct {
 	Type  BindEventType
 	Count int //total attached
 }
-
-type chanCloseMsg struct{}

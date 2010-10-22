@@ -30,7 +30,7 @@ func (gch *genericMsgChan) Close() {
 			id1 = gch.idTranslate(id1)  
 		}
 		id1, _ = id1.Clone(NumScope, NumMembership) //special id to mark chan close
-		gch.ch <- &genericMsg{id1, chanCloseMsg{}} 
+		gch.ch <- &genericMsg{id1, nil} 
 	}
 }
 func (gch *genericMsgChan) Closed() bool { return closed(gch.ch) }
@@ -227,7 +227,7 @@ func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) (err os.
 	s.id, _ = id.Clone(scb.scope, scb.member)
 	rt := scb.router
 	buflen := rt.defChanBufSize
-	if rt.getSysIdIdx(id) >= 0 {
+	if id.SysIdIndex() >= 0 {
 		buflen = DefCmdChanBufSize
 	}
 	s.ch = reflect.MakeChan(chanType, buflen)

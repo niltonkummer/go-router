@@ -133,7 +133,7 @@ func (s *routerImpl) IdsForSend(predicate func(id Id) bool) map[interface{}]*IdC
 	s.tblLock.Lock()
 	for _, v := range s.routingTable {
 		for _, e := range v.senders {
-			idx := s.getSysIdIdx(e.Id)
+			idx := e.Id.SysIdIndex()
 			if idx < 0 && predicate(e.Id) {
 				ids[e.Id.Key()] = &IdChanInfo{Id: e.Id, ChanType: v.chanType}
 			}
@@ -148,7 +148,7 @@ func (s *routerImpl) IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdC
 	s.tblLock.Lock()
 	for _, v := range s.routingTable {
 		for _, e := range v.recvers {
-			idx := s.getSysIdIdx(e.Id)
+			idx := e.Id.SysIdIndex()
 			if idx < 0 && predicate(e.Id) {
 				ids[e.Id.Key()] = &IdChanInfo{Id: e.Id, ChanType: v.chanType}
 			}
@@ -170,22 +170,6 @@ func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.
 	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
 	if !ok {
 		err = os.ErrorString(errInvalidChan)
-		return
-	}
-	et := ch.Type().(*reflect.ChanType).Elem()
-	switch et := et.(type) {
-	case *reflect.BoolType:
-	case *reflect.IntType:
-	case *reflect.FloatType:
-	case *reflect.StringType:
-	case *reflect.PtrType:
-		if _, ok = et.Elem().(*reflect.StructType); !ok {
-			err = os.ErrorString(errInvalidChan)
-			return
-		}
-	default:
-		err = os.ErrorString(errInvalidChan)
-		return
 	}
 	return
 }
@@ -366,7 +350,7 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 		}
 	}
 
-	idx := s.getSysIdIdx(endp.Id)
+	idx := endp.Id.SysIdIndex()
 	matches := new(vector.Vector)
 
 	//find bindings for endpoint
@@ -502,7 +486,7 @@ func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
 	endp1.close()
 
 	//notifier will send in a separate goroutine, so non-blocking here
-	idx := s.getSysIdIdx(endp1.Id)
+	idx := endp1.Id.SysIdIndex()
 	if idx < 0 && endp.Id.Member() == MemberLocal { //not sys ids
 		switch endp.kind {
 		case senderType:
@@ -552,24 +536,6 @@ func (s *routerImpl) initSysIds() {
 	for i := 0; i < NumSysInternalIds; i++ {
 		s.sysIds[i], _ = s.seedId.SysID(i)
 	}
-}
-
-func (s *routerImpl) getSysIdIdx(id Id) int {
-	for i := 0; i < NumSysIds; i++ {
-		if id.Match(s.sysIds[i]) {
-			return i
-		}
-	}
-	return -1
-}
-
-func (s *routerImpl) getSysInternalIdIdx(id Id) int {
-	for i := 0; i < NumSysInternalIds; i++ {
-		if id.Match(s.sysIds[i]) {
-			return i
-		}
-	}
-	return -1
 }
 
 func (s *routerImpl) addProxy(p Proxy) {
