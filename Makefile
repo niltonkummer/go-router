@@ -1,7 +1,7 @@
 include $(GOROOT)/src/Make.inc
 
 # name of the package (library) being built
-TARG=go-router.googlecode.com/svn/branches/router1/router
+TARG=go-router.googlecode.com/svn/branches/router1
 
 # source files in package
 GOFILES=\
