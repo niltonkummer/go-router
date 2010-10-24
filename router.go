@@ -47,7 +47,6 @@ const (
 type Router interface {
 	//---- core api ----
 	//Attach chans to id in router, with an optional argument (chan *BindEvent)
-	//currently only accept the following chan types: chan bool/int/float/string/*struct
 	//When specified, the optional argument will serve two purposes:
 	//1. used to tell when the remote peers connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
