@@ -1,3 +1,5 @@
+include $(GOROOT)/src/Make.inc
+
 # name of the package (library) being built
 TARG=router
 

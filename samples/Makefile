@@ -1,4 +1,3 @@
-# defines $(GC) (compiler), $(LD) (linker) and $(O) (architecture)
 include $(GOROOT)/src/Make.inc
 
 # build executables
@@ -64,6 +63,8 @@ server: package
 
 clean:
 	rm -rf *.[$(OS)o] *.a [$(OS)].out _obj _test _testmain.go main test chatcli chatsrv pingpong1 pingpong2 pingpong3 pingpong4 pingpong5 client server
+
+nuke: 	clean
 
 package: ../_obj/router.a
 
