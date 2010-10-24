@@ -1,8 +1,3 @@
-# prerequisite: GOROOT and GOARCH must be defined
-
-# defines $(GC) (compiler), $(LD) (linker) and $(O) (architecture)
-include $(GOROOT)/src/Make.inc
-
 # name of the package (library) being built
 TARG=router
 
