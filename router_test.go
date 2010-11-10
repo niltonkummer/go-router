@@ -18,15 +18,15 @@ func TestStrId(t *testing.T) {
 	chi2 := make(chan string)
 	cho := make(chan string)
 	done := make(chan bool)
-	err := rout.AttachSendChan(StrID("test"), cho)
+	_, err := rout.AttachSendChan(StrID("test"), cho)
 	if err != nil {
 		t.Fatal("TestStrId failed at router.AttachSendChan()")
 	}
-	err = rout.AttachRecvChan(StrID("test"), chi1)
+	_, err = rout.AttachRecvChan(StrID("test"), chi1)
 	if err != nil {
 		t.Fatal("TestStrId failed at router.AttachRecvChan-chi1")
 	}
-	err = rout.AttachRecvChan(StrID("test"), chi2)
+	_, err = rout.AttachRecvChan(StrID("test"), chi2)
 	if err != nil {
 		t.Fatal("TestStrId failed at router.AttachRecvChan-chi2")
 	}
@@ -76,11 +76,11 @@ func TestRemoteConn(t *testing.T) {
 			chi1 := make(chan string)
 			bound := make(chan *BindEvent, 1)
 			done := make(chan bool)
-			err = rout1.AttachSendChan(IntID(10), cho, bound)
+			_, err = rout1.AttachSendChan(IntID(10), cho, bound)
 			if err != nil {
 				t.Fatal("TestRemoteConn failed at server : router.AttachSendChan()")
 			}
-			err = rout1.AttachRecvChan(IntID(10), chi1)
+			_, err = rout1.AttachRecvChan(IntID(10), chi1)
 			if err != nil {
 				t.Fatal("TestRemoteConn failed at server : router.AttachRecvChan()")
 			}
@@ -127,11 +127,11 @@ func TestRemoteConn(t *testing.T) {
 			chi2 := make(chan string)
 			chi3 := make(chan string)
 			done := make(chan bool)
-			err = rout2.AttachRecvChan(IntID(10), chi2)
+			_, err = rout2.AttachRecvChan(IntID(10), chi2)
 			if err != nil {
 				t.Fatal("TestRemoteConn failed at client chi2 : router.AttachRecvChan()")
 			}
-			err = rout2.AttachRecvChan(IntID(10), chi3)
+			_, err = rout2.AttachRecvChan(IntID(10), chi3)
 			if err != nil {
 				t.Fatal("TestRemoteConn failed at client chi3 : router.AttachRecvChan()")
 			}
