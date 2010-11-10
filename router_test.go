@@ -66,7 +66,6 @@ func TestRemoteConn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		//
 		rout1 := New(IntID(), 32, BroadcastPolicy /*, "router1", ScopeLocal*/ )
 		_, err = rout1.ConnectRemote(conn, GobMarshaling)
 		if err != nil {
@@ -118,7 +117,6 @@ func TestRemoteConn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		//
 		rout2 := New(IntID(), 32, BroadcastPolicy /*, "router2", ScopeLocal*/ )
 		_, err = rout2.ConnectRemote(conn, GobMarshaling)
 		if err != nil {
@@ -160,3 +158,4 @@ func TestRemoteConn(t *testing.T) {
 	}()
 	<-srvdone
 }
+ 
