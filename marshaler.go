@@ -230,7 +230,7 @@ func (j jsonMarshalingPolicy) NewDemarshaler(r io.Reader, p *proxyImpl) Demarsha
 	jm.ptrBool = reflect.NewValue(xb).(*reflect.PtrValue)
 	var xi *int = nil
 	jm.ptrInt = reflect.NewValue(xi).(*reflect.PtrValue)
-	var xf *float = nil
+	var xf *float64 = nil
 	jm.ptrFloat = reflect.NewValue(xf).(*reflect.PtrValue)
 	var xs *string = nil
 	jm.ptrString = reflect.NewValue(xs).(*reflect.PtrValue)
