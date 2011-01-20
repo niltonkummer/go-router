@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -33,7 +33,7 @@ type IdChanInfoMsg struct {
 	Info []*IdChanInfo
 }
 
-//the generic internal message
+//the generic message
 type genericMsg struct {
 	Id   Id
 	Data interface{}
@@ -41,9 +41,20 @@ type genericMsg struct {
 
 //a message struct containing information about remote router connection
 type ConnInfoMsg struct {
-	ConnInfo string
-	Error    os.Error
-	SeedId   Id
+	ConnInfo       string
+	Error          os.Error
+	Id             Id
+	Type           int //async/flowControlled/raw
+}
+
+//recver-router notify sender-router which channel are ready to recv how many msgs
+type ChanReadyInfo struct {
+	Id     Id
+	Credit int
+}
+
+type ConnReadyMsg struct {
+	Info []*ChanReadyInfo
 }
 
 type BindEventType int8

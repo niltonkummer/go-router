@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -11,8 +11,8 @@ import (
 )
 
 type notifyChansPerScope struct {
-	chans [4]chan *IdChanInfoMsg
-	endps [4]*Endpoint
+	chans   [4]chan *IdChanInfoMsg
+	routChs [4]*RoutedChan
 }
 
 func (n *notifyChansPerScope) Close(scope int, member int, r *routerImpl) {
@@ -28,7 +28,7 @@ func newNotifyChansPerScope(scope int, member int, r *routerImpl) *notifyChansPe
 	nc := new(notifyChansPerScope)
 	for i := 0; i < 4; i++ {
 		nc.chans[i] = make(chan *IdChanInfoMsg, r.defChanBufSize)
-		nc.endps[i], _ = r.AttachSendChan(r.NewSysID(PubId+i, scope, member), nc.chans[i])
+		nc.routChs[i], _ = r.AttachSendChan(r.NewSysID(PubId+i, scope, member), nc.chans[i])
 	}
 	return nc
 }
@@ -56,7 +56,7 @@ func (n *notifier) Close() {
 func (n notifier) notifyPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyPub: %v", info.Id))
 	nc := n.notifyChans[info.Id.Scope()]
-	if nc.endps[0].NumBindings() > 0 {
+	if nc.routChs[0].NumPeers() > 0 {
 		ok := nc.chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
 			go func() { nc.chans[0] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
@@ -67,7 +67,7 @@ func (n notifier) notifyPub(info *IdChanInfo) {
 func (n notifier) notifyUnPub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyUnPub: %v", info.Id))
 	nc := n.notifyChans[info.Id.Scope()]
-	if nc.endps[1].NumBindings() > 0 {
+	if nc.routChs[1].NumPeers() > 0 {
 		ok := nc.chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
 			go func() { nc.chans[1] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
@@ -78,7 +78,7 @@ func (n notifier) notifyUnPub(info *IdChanInfo) {
 func (n notifier) notifySub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifySub: %v", info.Id))
 	nc := n.notifyChans[info.Id.Scope()]
-	if nc.endps[2].NumBindings() > 0 {
+	if nc.routChs[2].NumPeers() > 0 {
 		ok := nc.chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
 			go func() { nc.chans[2] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()
@@ -89,7 +89,7 @@ func (n notifier) notifySub(info *IdChanInfo) {
 func (n notifier) notifyUnSub(info *IdChanInfo) {
 	n.router.Log(LOG_INFO, fmt.Sprintf("notifyUnSub: %v", info.Id))
 	nc := n.notifyChans[info.Id.Scope()]
-	if nc.endps[3].NumBindings() > 0 {
+	if nc.routChs[3].NumPeers() > 0 {
 		ok := nc.chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}}
 		if !ok {
 			go func() { nc.chans[3] <- &IdChanInfoMsg{Info: []*IdChanInfo{info}} }()

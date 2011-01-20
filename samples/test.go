@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -11,6 +11,7 @@ import (
 	"router"
 	"strings"
 	"net"
+	"time"
 )
 
 func test_IntId() {
@@ -223,8 +224,8 @@ func test_notification() {
 }
 
 func test_local_conn() {
-	rout1 := router.New(router.IntID(), 32, router.BroadcastPolicy /*, "router1", router.ScopeLocal*/ )
-	rout2 := router.New(router.IntID(), 32, router.BroadcastPolicy /*, "router2", router.ScopeLocal*/ )
+	rout1 := router.New(router.IntID(), 32, router.BroadcastPolicy /* , "router1", router.ScopeLocal*/ )
+	rout2 := router.New(router.IntID(), 32, router.BroadcastPolicy /* , "router2", router.ScopeLocal*/ )
 	rout1.Connect(rout2)
 	chi1 := make(chan string)
 	chi2 := make(chan string)
@@ -388,7 +389,7 @@ func test_remote_conn() {
 		}
 		fmt.Println("server start")
 		//
-		rout1 := router.New(router.IntID(), 32, router.BroadcastPolicy /*, "router1", router.ScopeLocal*/ )
+		rout1 := router.New(router.IntID(), 32, router.BroadcastPolicy /* , "router1", router.ScopeLocal*/ )
 		_, err = rout1.ConnectRemote(conn, router.GobMarshaling)
 		if err != nil {
 			fmt.Println(err)
@@ -437,7 +438,7 @@ func test_remote_conn() {
 		}
 		fmt.Println("client connect")
 		//
-		rout2 := router.New(router.IntID(), 32, router.BroadcastPolicy /*, "router2", router.ScopeLocal*/ )
+		rout2 := router.New(router.IntID(), 32, router.BroadcastPolicy /* , "router2", router.ScopeLocal*/ )
 		_, err = rout2.ConnectRemote(conn, router.GobMarshaling)
 		if err != nil {
 			fmt.Println(err)
@@ -450,6 +451,153 @@ func test_remote_conn() {
 			go func() {
 				for v := range chi2 {
 					fmt.Println("router2/sink2 got: ", v)
+				}
+				done <- true
+			}()
+			go func() {
+				i := 0
+				for v := range chi3 {
+					fmt.Println("router2/sink3 got: ", v)
+					i++
+					if i == 2 {
+						rout2.DetachChan(router.IntID(10), chi3)
+					}
+				}
+				done <- true
+			}()
+			<-done
+			<-done
+		}
+		clidone <- 1
+		conn.Close()
+		rout2.Close()
+	}()
+	<-srvdone
+}
+
+func test_async_router() {
+	//create a async router by setting buffer size to UnlimitedBuffer(-1) in router.New()
+	rout1 := router.New(router.IntID(), router.UnlimitedBuffer, router.BroadcastPolicy)
+	rout2 := router.New(router.IntID(), router.UnlimitedBuffer, router.BroadcastPolicy)
+	rout1.Connect(rout2)
+	chi1 := make(chan string)
+	chi2 := make(chan string)
+	chi3 := make(chan string)
+	cho := make(chan string)
+	bound := make(chan *router.BindEvent, 1)
+	//when attaching sending chan, add a (chan BindEvent) for notifying recver connecting
+	rout1.AttachSendChan(router.IntID(10), cho, bound)
+	rout1.AttachRecvChan(router.IntID(10), chi1)
+	rout2.AttachRecvChan(router.IntID(10), chi2)
+	rout2.AttachRecvChan(router.IntID(10), chi3)
+	//wait for some recvers connecting
+	for {
+		if (<-bound).Count == 2 {
+			break
+		}
+	}
+	//because we use async router, sending on those router attached channels
+	//will never block. we do not need spawn goroutines in the following
+	//go func() {
+	cho <- "hello1"
+	cho <- "hello2"
+	cho <- "hello3"
+	cho <- "from router1/src"
+	close(cho)
+	//}()
+	//go func() {
+	for v := range chi1 {
+		fmt.Println("router1/sink1 got: ", v)
+	}
+	//}()
+	//go func() {
+	for v := range chi2 {
+		fmt.Println("router2/sink2 got: ", v)
+	}
+	//}()
+	//go func() {
+	i := 0
+	for v := range chi3 {
+		fmt.Println("router2/sink3 got: ", v)
+		i++
+		if i == 2 {
+			rout2.DetachChan(router.IntID(10), chi3)
+		}
+	}
+	//}()
+	rout1.Close()
+	rout2.Close()
+}
+
+func test_flow_control() {
+	listening := make(chan string)
+	srvdone := make(chan int)
+	clidone := make(chan int)
+	//run server
+	go func() {
+		l, err := net.Listen("tcp", ":0")
+		listening <- l.Addr().String()
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("server start")
+		rout1 := router.New(router.IntID(), 5, router.BroadcastPolicy /*, "router1", router.ScopeLocal*/ )
+		//set FlowControl(true) flag to turn on flow control on connection stream
+		_, err = rout1.ConnectRemote(conn, router.GobMarshaling, router.FlowControl)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			cho := make(chan int)
+			bound := make(chan *router.BindEvent, 1)
+			done := make(chan bool)
+			rout1.AttachSendChan(router.IntID(10), cho, bound)
+			//wait for recvers connecting
+			<-bound
+			//start sending msgs
+			go func() {
+				for i := 0; i < 20; i++ {
+					cho <- i
+					fmt.Println("client sent: ", i)
+				}
+				close(cho)
+				done <- true
+			}()
+			<-done
+		}
+		<-clidone
+		conn.Close()
+		l.Close()
+		srvdone <- 1
+		rout1.Close()
+	}()
+	//run client
+	go func() {
+		addr := <-listening // wait for server to start
+		dialaddr := "127.0.0.1" + addr[strings.LastIndex(addr, ":"):]
+		conn, err := net.Dial("tcp", "", dialaddr)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println("client connect")
+		rout2 := router.New(router.IntID(), 5, router.BroadcastPolicy /*, "router2", router.ScopeLocal*/ )
+		//set true flag to turn on flow control
+		_, err = rout2.ConnectRemote(conn, router.GobMarshaling, router.FlowControl)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			chi2 := make(chan int)
+			chi3 := make(chan int)
+			done := make(chan bool)
+			rout2.AttachRecvChan(router.IntID(10), chi2, 3)
+			rout2.AttachRecvChan(router.IntID(10), chi3)
+			go func() {
+				for v := range chi2 {
+					fmt.Println("router2/sink2 got: ", v)
+					if v < 3 {
+						time.Sleep(1e9)
+					}
 				}
 				done <- true
 			}()
@@ -489,6 +637,10 @@ func main() {
 	test_local_conn()
 	fmt.Println("-------test_remote_conn-------")
 	test_remote_conn()
+	fmt.Println("-------test_async_router-------")
+	test_async_router()
+	fmt.Println("-------test_flow_control (internal buffer size = 5)-------")
+	test_flow_control()
 	/*
 		fmt.Println("-------test_logger-------")
 		test_logger()

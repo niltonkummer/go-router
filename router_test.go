@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -158,4 +158,3 @@ func TestRemoteConn(t *testing.T) {
 	}()
 	<-srvdone
 }
- 

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -10,13 +10,12 @@ import (
 	"os"
 	"time"
 	"log"
-	//	"fmt"
-	//		"strconv"
 )
 
 //Some basic error msgs for log and fault
 var (
 	errIdTypeMismatch        = "id type mismatch"
+	errRouterTypeMismatch    = "router type mismatch"
 	errInvalidChan           = "invalid channels be attached to router; valid channel types: chan bool/int/float/string/*struct"
 	errInvalidBindChan       = "invalid channels for notifying sender/recver attachment"
 	errChanTypeMismatch      = "channels of diff type attach to matched id"
@@ -65,11 +64,11 @@ type LogRecord struct {
 }
 
 type logger struct {
-	endp        *Endpoint
-	source      string
-	logChan     chan *LogRecord
-	router      Router
-	id          Id
+	routCh  *RoutedChan
+	source  string
+	logChan chan *LogRecord
+	router  Router
+	id      Id
 }
 
 func newlogger(id Id, r Router, src string, bufSize int) *logger {
@@ -79,7 +78,7 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 	logger.source = src
 	logger.logChan = make(chan *LogRecord, bufSize)
 	var err os.Error
-	logger.endp, err = logger.router.AttachSendChan(id, logger.logChan)
+	logger.routCh, err = logger.router.AttachSendChan(id, logger.logChan)
 	if err != nil {
 		log.Panicln("failed to add logger for ", logger.source)
 		return nil
@@ -88,16 +87,16 @@ func newlogger(id Id, r Router, src string, bufSize int) *logger {
 }
 
 func (l *logger) log(p LogPriority, msg interface{}) {
-	if l.endp.NumBindings() == 0 {
+	if l.routCh.NumPeers() == 0 {
 		return
 	}
 
 	lr := &LogRecord{p, l.source, msg, time.Nanoseconds()}
 	/*
-		//when logChan full, drop the oldest log record, avoid block / slow down app
-		for !(l.logChan <- lr) {
-			<- l.logChan;
-		}
+	 //when logChan full, drop the oldest log record, avoid block / slow down app
+	 for !(l.logChan <- lr) {
+	 <- l.logChan;
+	 }
 	*/
 	//log all msgs even if too much log recrods may block / slow down app
 	l.logChan <- lr
@@ -185,11 +184,11 @@ func (l *LogSink) runConsoleLogSink(logId Id, r Router) {
 			}
 			//convert timestamp, following format/code of package "log" for consistency
 			/*
-				ts := ""
-					itoa := strconv.Itoa;
-					t := time.SecondsToLocalTime(lr.Timestamp / 1e9)
-					ts += itoa(int(t.Year)) + "/" + itoa(t.Month) + "/" + itoa(t.Day) + " "
-					ts += itoa(t.Hour) + ":" + itoa(t.Minute) + ":" + itoa(t.Second)
+			 ts := ""
+			 itoa := strconv.Itoa;
+			 t := time.SecondsToLocalTime(lr.Timestamp / 1e9)
+			 ts += itoa(int(t.Year)) + "/" + itoa(t.Month) + "/" + itoa(t.Day) + " "
+			 ts += itoa(t.Hour) + ":" + itoa(t.Minute) + ":" + itoa(t.Second)
 			*/
 
 			switch lr.Pri {
@@ -222,12 +221,12 @@ type FaultRecord struct {
 }
 
 type faultRaiser struct {
-	endp        *Endpoint
-	source      string
-	faultChan   chan *FaultRecord
-	router      *routerImpl
-	id          Id
-	caught      bool
+	routCh    *RoutedChan
+	source    string
+	faultChan chan *FaultRecord
+	router    *routerImpl
+	id        Id
+	caught    bool
 }
 
 func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
@@ -237,7 +236,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 	faultRaiser.source = src
 	faultRaiser.faultChan = make(chan *FaultRecord, bufSize)
 	var err os.Error
-	faultRaiser.endp, err = faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan)
+	faultRaiser.routCh, err = faultRaiser.router.AttachSendChan(id, faultRaiser.faultChan)
 	if err != nil {
 		log.Println("failed to add faultRaiser for [%v, %v]", faultRaiser.source, id)
 		return nil
@@ -247,7 +246,7 @@ func newfaultRaiser(id Id, r Router, src string, bufSize int) *faultRaiser {
 }
 
 func (l *faultRaiser) raise(msg os.Error) {
-	if l.endp.NumBindings() == 0 {
+	if l.routCh.NumPeers() == 0 {
 		//l.router.Log(LOG_ERROR, fmt.Sprintf("Crash at %v", msg))
 		log.Panicf("Crash at %v", msg)
 		return

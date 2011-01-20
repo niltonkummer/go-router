@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -12,6 +12,12 @@ import (
 	"reflect"
 )
 
+//
+// The programming of Dispatchers:
+// 1. do not depend on specific chan types
+// 2. messages sent are represented as reflect.Value
+// 3. receivers are array of RoutedChans with Channel interface of Send()/Recv()/...
+//
 //DispatchPolicy is used to generate concrete dispatcher instances.
 //For the kind of dispatcher which has no internal state, the same instance
 //can be returned.
@@ -21,13 +27,13 @@ type DispatchPolicy interface {
 
 //Dispatcher is the common interface of all dispatchers
 type Dispatcher interface {
-	Dispatch(v reflect.Value, recvers []*Endpoint)
+	Dispatch(v reflect.Value, recvers []*RoutedChan)
 }
 
 //DispatchFunc is a wrapper to convert a plain function into a dispatcher
-type DispatchFunc func(v reflect.Value, recvers []*Endpoint)
+type DispatchFunc func(v reflect.Value, recvers []*RoutedChan)
 
-func (f DispatchFunc) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (f DispatchFunc) Dispatch(v reflect.Value, recvers []*RoutedChan) {
 	f(v, recvers)
 }
 
@@ -43,10 +49,10 @@ func (f PolicyFunc) NewDispatcher() Dispatcher {
 */
 
 //Simple broadcast is a plain function
-func Broadcast(v reflect.Value, recvers []*Endpoint) {
+func Broadcast(v reflect.Value, recvers []*RoutedChan) {
 	for _, rc := range recvers {
-		if !rc.Chan.Closed() {
-			rc.Chan.Send(v)
+		if !rc.Closed() {
+			rc.Send(v)
 		}
 	}
 }
@@ -55,11 +61,11 @@ func Broadcast(v reflect.Value, recvers []*Endpoint) {
 var BroadcastPolicy DispatchPolicy = PolicyFunc(func() Dispatcher { return DispatchFunc(Broadcast) })
 
 //KeepLastBroadcast never block. if running out of Chan buffer, drop old items and keep the latest items
-func KeepLatestBroadcast(v reflect.Value, recvers []*Endpoint) {
+func KeepLatestBroadcast(v reflect.Value, recvers []*RoutedChan) {
 	for _, rc := range recvers {
-		if !rc.Chan.Closed() {
-			for !rc.Chan.TrySend(v) {
-				rc.Chan.TryRecv()
+		if !rc.Closed() {
+			for !rc.TrySend(v) {
+				rc.TryRecv()
 			}
 		}
 	}
@@ -75,13 +81,13 @@ type Roundrobin struct {
 
 func NewRoundrobin() *Roundrobin { return &Roundrobin{0} }
 
-func (r *Roundrobin) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (r *Roundrobin) Dispatch(v reflect.Value, recvers []*RoutedChan) {
 	start := r.next
 	for {
 		rc := recvers[r.next]
 		r.next = (r.next + 1) % len(recvers)
-		if !rc.Chan.Closed() {
-			rc.Chan.Send(v)
+		if !rc.Closed() {
+			rc.Send(v)
 			break
 		}
 		if r.next == start {
@@ -100,12 +106,12 @@ func NewRandomDispatcher() *RandomDispatcher {
 	return (*RandomDispatcher)(rand.New(rand.NewSource(time.Seconds())))
 }
 
-func (rd *RandomDispatcher) Dispatch(v reflect.Value, recvers []*Endpoint) {
+func (rd *RandomDispatcher) Dispatch(v reflect.Value, recvers []*RoutedChan) {
 	for {
 		ind := ((*rand.Rand)(rd)).Intn(len(recvers))
 		rc := recvers[ind]
-		if !rc.Chan.Closed() {
-			rc.Chan.Send(v)
+		if !rc.Closed() {
+			rc.Send(v)
 			break
 		}
 	}
@@ -130,7 +136,7 @@ func NewTimeoutDropBroadcaster(to int64) *TimeoutDropBroadcaster {
 	return &TimeoutDropBroadcaster{to}
 }
 
-func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *TimeoutDropBroadcaster) Dispatch(v interface{}, recvers []*RoutedChan) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -174,7 +180,7 @@ func (r *TimeoutReportBroadcaster) SendAndKeepLatest(to *TimeoutEvent) {
 	}
 }
 
-func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *TimeoutReportBroadcaster) Dispatch(v interface{}, recvers []*RoutedChan) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)
@@ -220,7 +226,7 @@ func NewKeepLatestBroadcaster(to int64) *KeepLatestBroadcaster {
 	return &KeepLatestBroadcaster{to}
 }
 
-func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*Endpoint) {
+func (r *KeepLatestBroadcaster) Dispatch(v interface{}, recvers []*RoutedChan) {
 	for _, rc := range recvers {
 		if !closed(rc.Chan) {
 			ticker := time.NewTicker(r.timeNs)

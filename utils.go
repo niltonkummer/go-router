@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -13,79 +13,39 @@ import (
 	"sync"
 )
 
-//GenericChan wraps "chan *genericMsg" and presents the same api as reflectChanValue
-type genericMsgChan struct {
-	id Id
-	ch chan *genericMsg
-	idTranslate func(Id)Id
-	sendChanCloseMsg bool
-}
-func (gch *genericMsgChan) Type() reflect.Type { return reflect.Typeof(gch.ch) }
-func (gch *genericMsgChan) Interface() interface{} { return gch }
-func (gch *genericMsgChan) Cap() int { return cap(gch.ch) }
-func (gch *genericMsgChan) Close() { 
-	if gch.sendChanCloseMsg {
-		id1 := gch.id
-		if gch.idTranslate != nil {
-			id1 = gch.idTranslate(id1)  
-		}
-		id1, _ = id1.Clone(NumScope, NumMembership) //special id to mark chan close
-		gch.ch <- &genericMsg{id1, nil} 
-	}
-}
-func (gch *genericMsgChan) Closed() bool { return closed(gch.ch) }
-func (gch *genericMsgChan) IsNil() bool { return gch.ch == nil }
-func (gch *genericMsgChan) Len() int { return len(gch.ch) }
-func (gch *genericMsgChan) Recv() reflect.Value { return reflect.NewValue((<-gch.ch).Data) }
-func (gch *genericMsgChan) Send(v reflect.Value) { 
-	id1 := gch.id
-	if gch.idTranslate != nil {
-		id1 = gch.idTranslate(id1)
-	}
-	gch.ch <- &genericMsg{id1, v.Interface()} 
-}
-func (gch *genericMsgChan) TryRecv() reflect.Value { 
-	v, ok := <- gch.ch
-	if !ok {
-		return nil
-	}
-	return reflect.NewValue(v.Data)
-}
-func (gch *genericMsgChan) TrySend(v reflect.Value) bool { 
-	id1 := gch.id
-	if gch.idTranslate != nil {
-		id1 = gch.idTranslate(id1)
-	}
-	return gch.ch <- &genericMsg{id1, v.Interface()} 
-}
-
 //recvChanBundle groups a set of recvChans together
 //recvChanBundle has no lock protection, since it is only used from proxy mainLoop
 type recverInBundle struct {
-	id          Id
-	ch          reflectChanValue
-	endp        *Endpoint
+	id     Id
+	ch     Channel
+	routCh *RoutedChan
 }
 
 type recvChanBundle struct {
-	router           *routerImpl
-	scope            int
-	member           int
-	recvChans        map[interface{}]*recverInBundle
+	router    *routerImpl
+	proxy     *proxyImpl
+	scope     int
+	member    int
+	recvChans map[interface{}]*recverInBundle
 }
 
-func newRecvChanBundle(r Router, s int, m int) *recvChanBundle {
+func newRecvChanBundle(p *proxyImpl, s int, m int) *recvChanBundle {
 	rcb := new(recvChanBundle)
-	rcb.router = r.(*routerImpl)
+	rcb.router = p.router
+	rcb.proxy = p
 	rcb.scope = s
 	rcb.member = m
 	rcb.recvChans = make(map[interface{}]*recverInBundle)
 	return rcb
 }
 
-func (rcb *recvChanBundle) RecverExist(id Id) bool {
-	_, ok := rcb.recvChans[id.Key()]
-	return ok
+//findRecver return ChanValue and its number of bindings
+func (rcb *recvChanBundle) findRecver(id Id) (Channel, int) {
+	r, ok := rcb.recvChans[id.Key()]
+	if !ok {
+		return nil, -1
+	}
+	return r.ch, r.routCh.NumPeers()
 }
 
 func (rcb *recvChanBundle) BindingCount(id Id) int {
@@ -93,7 +53,7 @@ func (rcb *recvChanBundle) BindingCount(id Id) int {
 	if !ok {
 		return -1
 	}
-	return r.endp.NumBindings()
+	return r.routCh.NumPeers()
 }
 
 func (rcb *recvChanBundle) AllRecverInfo() []*IdChanInfo {
@@ -109,20 +69,26 @@ func (rcb *recvChanBundle) AllRecverInfo() []*IdChanInfo {
 	return info
 }
 
-func (rcb *recvChanBundle) AddRecver(id Id, ch reflectChanValue) (err os.Error) {
+func (rcb *recvChanBundle) AddRecver(id Id, ch Channel, credit int) (err os.Error) {
 	_, ok := rcb.recvChans[id.Key()]
 	if ok {
 		err = os.ErrorString("router recvChanBundle: AddRecver duplicated id")
 		return
 	}
+	rt := rcb.router
 	r := new(recverInBundle)
 	r.id, _ = id.Clone(rcb.scope, rcb.member)
 	r.ch = ch
-	if gch, ok := ch.(*genericMsgChan); ok {
+	if rcb.proxy.streamPeer {
+		gch, _ := ch.(*genericMsgChan)
 		gch.id = r.id
+		if !rcb.router.async && rcb.proxy.flowControlled /* && id.SysIdIndex() < 0*/ {
+			//attach flow control adapter to stream chan recver
+			r.ch, _ = newFlowChanSender(ch, credit)
+			rcb.router.Log(LOG_INFO, fmt.Sprintf("add flow sender: %v %v", r.id, credit))
+		}
 	}
-	rt := rcb.router
-	r.endp, err = rt.AttachRecvChan(r.id, r.ch.Interface())
+	r.routCh, err = rt.AttachRecvChan(r.id, r.ch.Interface())
 	if err != nil {
 		return
 	}
@@ -156,13 +122,14 @@ func (rcb *recvChanBundle) Close() {
 
 //sendChanBundle groups a set of sendChans together
 type senderInBundle struct {
-	id          Id
-	ch          *reflect.ChanValue
-	endp        *Endpoint
+	id     Id
+	ch     Channel
+	routCh *RoutedChan
 }
 
 type sendChanBundle struct {
 	router *routerImpl
+	proxy  *proxyImpl
 	scope  int
 	member int
 	//for syncing modifying sendChans map from mainLoop and client access
@@ -170,9 +137,10 @@ type sendChanBundle struct {
 	sendChans map[interface{}]*senderInBundle
 }
 
-func newSendChanBundle(r Router, s int, m int) *sendChanBundle {
+func newSendChanBundle(p *proxyImpl, s int, m int) *sendChanBundle {
 	scb := new(sendChanBundle)
-	scb.router = r.(*routerImpl)
+	scb.proxy = p
+	scb.router = p.router
 	scb.scope = s
 	scb.member = m
 	scb.sendChans = make(map[interface{}]*senderInBundle)
@@ -180,14 +148,14 @@ func newSendChanBundle(r Router, s int, m int) *sendChanBundle {
 }
 
 //findSender return ChanValue and its number of bindings
-func (scb *sendChanBundle) findSender(id Id) (*reflect.ChanValue, int) {
+func (scb *sendChanBundle) findSender(id Id) (Channel, int) {
 	scb.Lock() //!no need for lock, since add/delSender and SenderExist all from same proxy ctrlMainLoop
 	s, ok := scb.sendChans[id.Key()]
 	scb.Unlock()
 	if !ok {
 		return nil, 0
 	}
-	return s.ch, s.endp.NumBindings()
+	return s.ch, s.routCh.NumPeers()
 }
 
 func (scb *sendChanBundle) AllSenderInfo() []*IdChanInfo {
@@ -212,7 +180,7 @@ func (scb *sendChanBundle) BindingCount(id Id) int {
 	if !ok {
 		return -1
 	}
-	return s.endp.NumBindings()
+	return s.routCh.NumPeers()
 }
 
 func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) (err os.Error) {
@@ -226,12 +194,24 @@ func (scb *sendChanBundle) AddSender(id Id, chanType *reflect.ChanType) (err os.
 	s := new(senderInBundle)
 	s.id, _ = id.Clone(scb.scope, scb.member)
 	rt := scb.router
-	buflen := rt.defChanBufSize
+	buflen := rt.recvChanBufSize(id)
 	if id.SysIdIndex() >= 0 {
 		buflen = DefCmdChanBufSize
 	}
 	s.ch = reflect.MakeChan(chanType, buflen)
-	s.endp, err = rt.AttachSendChan(s.id, s.ch.Interface())
+	//attach flow control adapters for stream send chans
+	if !scb.router.async && scb.proxy.flowControlled && scb.proxy.streamPeer /* && id.SysIdIndex() < 0*/ {
+		//flow controlled
+		s.ch = &flowChanRecver{
+			s.ch,
+			func(n int) {
+				scb.proxy.peer.sendCtrlMsg(&genericMsg{rt.SysID(ReadyId), &ConnReadyMsg{[]*ChanReadyInfo{&ChanReadyInfo{s.id, n}}}})
+			},
+		}
+		scb.router.Log(LOG_INFO, fmt.Sprintf("add flow recver: %v", s.id))
+
+	}
+	s.routCh, err = rt.AttachSendChan(s.id, s.ch.Interface())
 	if err != nil {
 		return
 	}

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -62,7 +62,7 @@ func (ft *FaultMgrTask) Run(r router.Router, sn string, role ServantRole) {
 			}
 		case rep := <-ft.faultReportChan:
 			if !closed(ft.faultReportChan) {
-				if ft.role == Active {  //only handle fault in active mode
+				if ft.role == Active { //only handle fault in active mode
 					ft.handleFaultReport(rep)
 				}
 			} else {

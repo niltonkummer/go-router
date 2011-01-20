@@ -41,7 +41,7 @@ trunk (router2):
   memory are protected by sync.Mutex
 . router's routing-table, endpoint's binding_set, and proxy's RecvChanBundle and
   SendChanBundle are directly shared and locked.
-. trunk/router2 is a bit more efficient than trunk/router1.
+. trunk (router2) is a bit more efficient than branches/router1.
 
 "ping-pong" tests: 
 same setup as above

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -10,15 +10,17 @@ import (
 	"io"
 	"os"
 	"fmt"
+	"reflect"
 )
 
 type stream struct {
-	peer peerIntf
-	outputChan chan *genericMsg
+	peer            peerIntf
+	outputChan      chan *genericMsg //outputMainLoop serve this chan
+	outputAsyncChan *asyncChan       //wrap outputChan to give it unlimited buffering
 	//
-	rwc        io.ReadWriteCloser
-	mar        Marshaler
-	demar      Demarshaler
+	rwc   io.ReadWriteCloser
+	mar   Marshaler
+	demar Demarshaler
 	//
 	proxy *proxyImpl
 	//others
@@ -31,7 +33,8 @@ func newStream(rwc io.ReadWriteCloser, mp MarshalingPolicy, p *proxyImpl) *strea
 	s := new(stream)
 	s.proxy = p
 	//
-	s.outputChan = make(chan *genericMsg, s.proxy.router.defChanBufSize + DefCmdChanBufSize)
+	s.outputChan = make(chan *genericMsg, s.proxy.router.defChanBufSize+DefCmdChanBufSize)
+	s.outputAsyncChan = &asyncChan{Channel: reflect.NewValue(s.outputChan).(*reflect.ChanValue)}
 	s.rwc = rwc
 	s.mar = mp.NewMarshaler(rwc)
 	s.demar = mp.NewDemarshaler(rwc, p)
@@ -58,9 +61,9 @@ func (s *stream) start() {
 func (s *stream) Close() {
 	s.Log(LOG_INFO, "Close() is called")
 	//shutdown outputMainLoop
-	close(s.outputChan) 
+	close(s.outputChan)
 	//notify peer
-	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
+	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(DisconnId), &ConnInfoMsg{}})
 }
 
 func (s *stream) closeImpl() {
@@ -68,7 +71,7 @@ func (s *stream) closeImpl() {
 		s.Log(LOG_INFO, "closeImpl called")
 		s.Closed = true
 		//shutdown outputMainLoop
-		close(s.outputChan) 
+		close(s.outputChan)
 		//shutdown inputMainLoop
 		s.rwc.Close()
 		//close logger
@@ -77,17 +80,31 @@ func (s *stream) closeImpl() {
 	}
 }
 
-func (s *stream) appMsgChanForId(id Id) (reflectChanValue, int) {
+//when concating channel adpaters: asyncChan, genMsgChan, attach asyncChan first
+//so all outgoing channels share the same asyncChan (its buffer and forwarder)
+//there will only 1 forwarder for each stream connection
+func (s *stream) appMsgChanForId(id Id) (Channel, int) {
+	var appCh Channel
 	if s.proxy.translator != nil {
-		return &genericMsgChan{id, s.outputChan, func(id Id) Id { return s.proxy.translator.TranslateOutward(id) }, true}, 1
+		if s.proxy.router.async {
+			appCh = newGenMsgChan(s.proxy.translator.TranslateOutward(id), s.outputAsyncChan, true)
+		} else {
+			appCh = newGenericMsgChan(s.proxy.translator.TranslateOutward(id), s.outputChan, true)
+		}
+	} else {
+		if s.proxy.router.async {
+			appCh = newGenMsgChan(id, s.outputAsyncChan, true)
+		} else {
+			appCh = newGenericMsgChan(id, s.outputChan, true)
+		}
 	}
-	return &genericMsgChan{id, s.outputChan, nil, true}, 1
+	return appCh, 1
 }
 
 //send ctrl data to io.Writer
 func (s *stream) sendCtrlMsg(m *genericMsg) (err os.Error) {
 	s.outputChan <- m
-	if m.Id.SysIdIndex() == RouterDisconnId {
+	if m.Id.SysIdIndex() == DisconnId {
 		close(s.outputChan)
 	}
 	return
@@ -113,7 +130,7 @@ func (s *stream) outputMainLoop() {
 	if err != nil {
 		//must be io conn fail or marshal fail
 		//notify proxy disconn
-		s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
+		s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(DisconnId), &ConnInfoMsg{}})
 	}
 	s.closeImpl()
 	s.Log(LOG_INFO, "outputMainLoop exit")
@@ -130,8 +147,8 @@ func (s *stream) inputMainLoop() {
 	}
 	//when reach here, must be io conn fail or demarshal fail
 	//notify proxy disconn
-	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(RouterDisconnId), &ConnInfoMsg{}})
-	s.closeImpl() 
+	s.peer.sendCtrlMsg(&genericMsg{s.proxy.router.SysID(DisconnId), &ConnInfoMsg{}})
+	s.closeImpl()
 	s.Log(LOG_INFO, "inputMainLoop exit")
 }
 

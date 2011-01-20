@@ -12,13 +12,15 @@ Router is the main access point to functionality. Applications will create an in
 
 Router's main methods are as following:
 type Router interface {
-
-	//Attach chans to id in router, with an optional argument (chan BindEvent)
+	//---- core api ----
+	//Attach chans to id in router, with an optional argument (chan *BindEvent)
 	//When specified, the optional argument will serve two purposes:
-	//1. used to tell when other ends connecting/disconn
+	//1. used to tell when the remote peers connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
-	AttachSendChan(Id, interface{}, ...) os.Error
-	AttachRecvChan(Id, interface{}, ...) os.Error
+	//the returned RoutedChan object can be used to find the number of bound peers: routCh.NumPeers()
+	AttachSendChan(Id, interface{}, ...interface{}) (*RoutedChan, os.Error)
+	//3. When attaching recv chans, an optional integer can specify the internal buffering size
+	AttachRecvChan(Id, interface{}, ...interface{}) (*RoutedChan, os.Error)
 
 	//Detach sendChan/recvChan from router
 	DetachChan(Id, interface{}) os.Error
@@ -30,20 +32,36 @@ type Router interface {
 	//1. internally it calls Proxy.Connect(...) to do the real job
 	//2. The connection can be disconnected by calling Proxy.Close() on returned proxy object
 	//3. for more compilcated connection setup (such as setting IdFilter and IdTranslator), use Proxy.Connect() instead
+
 	//Connect to a local router
 	Connect(Router) (Proxy, Proxy, os.Error)
 
 	//Connect to a remote router thru io conn
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) (Proxy, os.Error)
-        ...
+	//1. io.ReadWriteCloser: transport connection
+	//2. MarshalingPolicy: gob or json marshaling
+	//3. bool flag: turn on flow control on connection
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy, ...bool) (Proxy, os.Error)
+
+	//--- other utils ---
+	//return pre-created SysIds according to the router's id-type, with ScopeGlobal / MemberLocal
+	SysID(idx int) Id
+
+	//create a new SysId with "args..." specifying scope/membership
+	NewSysID(idx int, args ...int) Id
+
+	//return all ids and their ChanTypes from router's namespace which satisfy predicate
+	IdsForSend(predicate func(id Id) bool) map[interface{}]*IdChanInfo
+	IdsForRecv(predicate func(id Id) bool) map[interface{}]*IdChanInfo
 }
 
 func New(seedId Id, bufSize int, disp DispatchPolicy, args ...) Router
 
 router.New(...) accepts the following arguments:
     1. seedId: a dummy id to show what type of ids will be used. New ids will be type-checked against this.
-    2. bufSize: by default, 32 is the default size for router's internal channels.
-                if bufSize > 0, its value will be used.
+    2. bufSize: the buffer size used for router's internal channels.
+           if bufSize >= 0, its value will be used
+           if bufSize < 0, it means unlimited buffering, so router is async and sending on 
+                                attached channels will never block
     3. disp: dispatch policy for router. by default, it is BroadcastPolicy
     4. optional arguments ...:
             name:     router's name, if name is defined, router internal logging will be turned on,
@@ -51,7 +69,6 @@ router.New(...) accepts the following arguments:
             LogScope: if this is set, a console log sink is installed to show router internal log
                       if logScope == ScopeLocal, only log msgs from local router will show up
                       if logScope == ScopeGlobal, all log msgs from connected routers will show up
-
 
 Router's Connect()/ConnectRemote() methods are just convenience wrappers which forward call to Proxy's Connect()/ConnectRemote().
 
@@ -68,9 +85,13 @@ Proxy.Close() is called to disconnect router from its peer.
 
 type Proxy interface {
 	Connect(Proxy) os.Error
-	ConnectRemote(io.ReadWriteCloser, MarshallingPolicy) os.Error
-	Start()
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy, ...bool) os.Error
 	Close()
+	//query messaging interface with peer
+	LocalPubInfo() []*IdChanInfo
+	LocalSubInfo() []*IdChanInfo
+	PeerPubInfo() []*IdChanInfo
+	PeerSubInfo() []*IdChanInfo
 }
 
 func NewProxy(r Router, name string, f IdFilter, t IdTranslator) Proxy
@@ -141,11 +162,16 @@ Applications can define their own customized id type according to the above inte
 2.2 Dispatcher
 
 Dispatchers define how the values from a send channel are dispatched to the recv channels bound to it. DispatcherPolicy is used to create instances of disptachers. Some dispatchers are stateful, such as roundrobin, we need a separate dispatcher for each send channel. A instance of DispatchPolicy is passed into router's constructor, which will define router's overall dispatching behaviour.
+The programming of Dispatchers are "generic" in the following aspects:
+    1> do not depend on specific chan types
+    2> messages sent are represented as reflect.Value
+    3> receivers are array of RoutedChans with Channel interface
+    4> Channel is api of reflect.ChanValue with Send()/Recv()/...
 
 There are three predefined dispatchers: broadcast, roundrobin and random, all implementing the following interfaces:
 
 type Dispatcher interface {
-	Dispatch(v interface{}, recvers []*endpoint)
+	Dispatch(v reflect.Value, recvers []*RoutedChan)
 }
 
 type DispatchPolicy interface {

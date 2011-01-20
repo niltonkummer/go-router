@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -35,8 +35,10 @@ func main() {
 
 	//create router and connect it to both active and standby servants
 	rot := router.New(router.StrID(), 32, router.BroadcastPolicy)
-	rot.ConnectRemote(conn1, router.GobMarshaling)
-	rot.ConnectRemote(conn2, router.GobMarshaling)
+	proxy1 := router.NewProxy(rot, "", nil, nil)
+	proxy2 := router.NewProxy(rot, "", nil, nil)
+	proxy1.ConnectRemote(conn1, router.GobMarshaling, router.FlowControl)
+	proxy2.ConnectRemote(conn2, router.GobMarshaling, router.FlowControl)
 
 	reqChan := make(chan string)
 	rspChan := make(chan string)

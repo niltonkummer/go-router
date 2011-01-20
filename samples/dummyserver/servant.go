@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -45,11 +45,7 @@ type Servant struct {
 
 func NewServant(n string, role ServantRole, done chan bool) *Servant {
 	s := new(Servant)
-	if role == Standby {
-		s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy /*, n, router.ScopeLocal*/ )
-	} else {
-		s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy /*, n, router.ScopeLocal*/ )
-	}
+	s.Rot = router.New(router.StrID(), 32, router.BroadcastPolicy /*, n, router.ScopeLocal*/ )
 	s.role = role
 	s.name = n
 	//start system tasks, ServiceTask will be created when clients connect
@@ -78,7 +74,9 @@ func (s *Servant) Run(done chan bool) {
 		}
 		fmt.Println(s.name, "connect one client")
 
-		_, err = s.Rot.ConnectRemote(conn, router.GobMarshaling)
+		//use flow control
+		proxy := router.NewProxy(s.Rot, "", nil, nil)
+		err = proxy.ConnectRemote(conn, router.GobMarshaling, router.FlowControl)
 		if err != nil {
 			fmt.Println(err)
 			continue

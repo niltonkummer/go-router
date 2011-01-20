@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -50,7 +50,7 @@ func (g gobMarshalingPolicy) NewMarshaler(w io.Writer) Marshaler {
 }
 
 func (g gobMarshalingPolicy) NewDemarshaler(r io.Reader, p *proxyImpl) Demarshaler {
-	return &gobDemarshaler{Decoder:gob.NewDecoder(r), proxy:p}
+	return &gobDemarshaler{Decoder: gob.NewDecoder(r), proxy: p}
 }
 
 func (gm *gobMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
@@ -59,11 +59,11 @@ func (gm *gobMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
 	}
 	switch e1 := e.(type) {
 	case *ConnInfoMsg:
-		if err = gm.Encode(e1.SeedId != nil); err != nil {
+		if err = gm.Encode(e1.Id != nil); err != nil {
 			return
 		}
-		if e1.SeedId != nil {
-			if err = gm.Encode(e1.SeedId); err != nil {
+		if e1.Id != nil {
+			if err = gm.Encode(e1.Id); err != nil {
 				return
 			}
 		}
@@ -80,6 +80,23 @@ func (gm *gobMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
 		}
 		if len(e1.ConnInfo) > 0 {
 			if err = gm.Encode(e1.ConnInfo); err != nil {
+				return
+			}
+		}
+		if err = gm.Encode(e1.Type); err != nil {
+			return
+		}
+		return
+	case *ConnReadyMsg:
+		num := len(e1.Info)
+		if err = gm.Encode(num); err != nil {
+			return
+		}
+		for _, v := range e1.Info {
+			if err = gm.Encode(v.Id); err != nil {
+				return
+			}
+			if err = gm.Encode(v.Credit); err != nil {
 				return
 			}
 		}
@@ -119,9 +136,13 @@ func (gm *gobDemarshaler) Demarshal() (id Id, ctrlMsg interface{}, appMsg reflec
 		return
 	}
 	switch id.SysIdIndex() {
-	case RouterConnId, RouterDisconnId, ConnErrorId, ConnReadyId:
+	case ConnId, DisconnId, ErrorId:
 		idc, _ := seedId.Clone()
-		ctrlMsg = &ConnInfoMsg{SeedId: idc}
+		ctrlMsg = &ConnInfoMsg{Id: idc}
+		err = gm.demarshalCtrlMsg(ctrlMsg)
+	case ReadyId:
+		idc, _ := seedId.Clone()
+		ctrlMsg = &ConnReadyMsg{[]*ChanReadyInfo{&ChanReadyInfo{Id: idc}}}
 		err = gm.demarshalCtrlMsg(ctrlMsg)
 	case PubId, UnPubId, SubId, UnSubId:
 		idc, _ := seedId.Clone()
@@ -148,7 +169,7 @@ func (gm *gobDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 			return
 		}
 		if flag {
-			if err = gm.Decode(e1.SeedId); err != nil {
+			if err = gm.Decode(e1.Id); err != nil {
 				return
 			}
 		}
@@ -174,6 +195,33 @@ func (gm *gobDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 			}
 			e1.ConnInfo = str
 		}
+		if err = gm.Decode(&e1.Type); err != nil {
+			return
+		}
+		return
+	case *ConnReadyMsg:
+		dummyId := e1.Info[0].Id
+		num := 0
+		if err = gm.Decode(&num); err != nil {
+			return
+		}
+		if num > 0 {
+			info := make([]*ChanReadyInfo, num)
+			for i := 0; i < num; i++ {
+				ici := new(ChanReadyInfo)
+				ici.Id, _ = dummyId.Clone()
+				if err = gm.Decode(ici.Id); err != nil {
+					return
+				}
+				if err = gm.Decode(&ici.Credit); err != nil {
+					return
+				}
+				info[i] = ici
+			}
+			e1.Info = info
+		} else {
+			e1.Info = nil
+		}
 		return
 	case *IdChanInfoMsg:
 		dummyId := e1.Info[0].Id
@@ -181,20 +229,24 @@ func (gm *gobDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 		if err = gm.Decode(&num); err != nil {
 			return
 		}
-		info := make([]*IdChanInfo, num)
-		for i := 0; i < num; i++ {
-			ici := new(IdChanInfo)
-			ici.Id, _ = dummyId.Clone()
-			if err = gm.Decode(ici.Id); err != nil {
-				return
+		if num > 0 {
+			info := make([]*IdChanInfo, num)
+			for i := 0; i < num; i++ {
+				ici := new(IdChanInfo)
+				ici.Id, _ = dummyId.Clone()
+				if err = gm.Decode(ici.Id); err != nil {
+					return
+				}
+				ici.ElemType = new(chanElemTypeData)
+				if err = gm.Decode(ici.ElemType); err != nil {
+					return
+				}
+				info[i] = ici
 			}
-			ici.ElemType = new(chanElemTypeData)
-			if err = gm.Decode(ici.ElemType); err != nil {
-				return
-			}
-			info[i] = ici
+			e1.Info = info
+		} else {
+			e1.Info = nil
 		}
-		e1.Info = info
 		return
 	default:
 		err = os.ErrorString("gobDemarshaler: Invalid Sys Msg Type")
@@ -210,10 +262,10 @@ type jsonMarshaler struct {
 }
 type jsonDemarshaler struct {
 	*json.Decoder
-	proxy *proxyImpl
-	ptrBool *reflect.PtrValue
-	ptrInt *reflect.PtrValue
-	ptrFloat *reflect.PtrValue
+	proxy     *proxyImpl
+	ptrBool   *reflect.PtrValue
+	ptrInt    *reflect.PtrValue
+	ptrFloat  *reflect.PtrValue
 	ptrString *reflect.PtrValue
 }
 
@@ -225,7 +277,7 @@ func (j jsonMarshalingPolicy) NewMarshaler(w io.Writer) Marshaler {
 }
 
 func (j jsonMarshalingPolicy) NewDemarshaler(r io.Reader, p *proxyImpl) Demarshaler {
-	jm := &jsonDemarshaler{Decoder:json.NewDecoder(r), proxy:p}
+	jm := &jsonDemarshaler{Decoder: json.NewDecoder(r), proxy: p}
 	var xb *bool = nil
 	jm.ptrBool = reflect.NewValue(xb).(*reflect.PtrValue)
 	var xi *int = nil
@@ -243,11 +295,11 @@ func (jm *jsonMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
 	}
 	switch e1 := e.(type) {
 	case *ConnInfoMsg:
-		if err = jm.Encode(e1.SeedId != nil); err != nil {
+		if err = jm.Encode(e1.Id != nil); err != nil {
 			return
 		}
-		if e1.SeedId != nil {
-			if err = jm.Encode(e1.SeedId); err != nil {
+		if e1.Id != nil {
+			if err = jm.Encode(e1.Id); err != nil {
 				return
 			}
 		}
@@ -267,7 +319,24 @@ func (jm *jsonMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
 				return
 			}
 		}
-		return nil
+		if err = jm.Encode(e1.Type); err != nil {
+			return
+		}
+		return
+	case *ConnReadyMsg:
+		num := len(e1.Info)
+		if err = jm.Encode(num); err != nil {
+			return
+		}
+		for _, v := range e1.Info {
+			if err = jm.Encode(v.Id); err != nil {
+				return
+			}
+			if err = jm.Encode(v.Credit); err != nil {
+				return
+			}
+		}
+		return
 	case *IdChanInfoMsg:
 		num := len(e1.Info)
 		if err = jm.Encode(num); err != nil {
@@ -286,7 +355,7 @@ func (jm *jsonMarshaler) Marshal(id Id, e interface{}) (err os.Error) {
 				return
 			}
 		}
-		return nil
+		return
 	default:
 		return jm.Encode(e)
 	}
@@ -303,9 +372,13 @@ func (jm *jsonDemarshaler) Demarshal() (id Id, ctrlMsg interface{}, appMsg refle
 		return
 	}
 	switch id.SysIdIndex() {
-	case RouterConnId, RouterDisconnId, ConnErrorId, ConnReadyId:
+	case ConnId, DisconnId, ErrorId:
 		idc, _ := seedId.Clone()
-		ctrlMsg = &ConnInfoMsg{SeedId: idc}
+		ctrlMsg = &ConnInfoMsg{Id: idc}
+		err = jm.demarshalCtrlMsg(ctrlMsg)
+	case ReadyId:
+		idc, _ := seedId.Clone()
+		ctrlMsg = &ConnReadyMsg{[]*ChanReadyInfo{&ChanReadyInfo{Id: idc}}}
 		err = jm.demarshalCtrlMsg(ctrlMsg)
 	case PubId, UnPubId, SubId, UnSubId:
 		idc, _ := seedId.Clone()
@@ -354,7 +427,7 @@ func (jm *jsonDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 			return
 		}
 		if flag {
-			if err = jm.Decode(e1.SeedId); err != nil {
+			if err = jm.Decode(e1.Id); err != nil {
 				return
 			}
 		}
@@ -380,6 +453,33 @@ func (jm *jsonDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 			}
 			e1.ConnInfo = str
 		}
+		if err = jm.Decode(&e1.Type); err != nil {
+			return
+		}
+		return
+	case *ConnReadyMsg:
+		dummyId := e1.Info[0].Id
+		num := 0
+		if err = jm.Decode(&num); err != nil {
+			return
+		}
+		if num > 0 {
+			info := make([]*ChanReadyInfo, num)
+			for i := 0; i < num; i++ {
+				ici := new(ChanReadyInfo)
+				ici.Id, _ = dummyId.Clone()
+				if err = jm.Decode(ici.Id); err != nil {
+					return
+				}
+				if err = jm.Decode(&ici.Credit); err != nil {
+					return
+				}
+				info[i] = ici
+			}
+			e1.Info = info
+		} else {
+			e1.Info = nil
+		}
 		return
 	case *IdChanInfoMsg:
 		dummyId := e1.Info[0].Id
@@ -387,20 +487,24 @@ func (jm *jsonDemarshaler) demarshalCtrlMsg(e interface{}) (err os.Error) {
 		if err = jm.Decode(&num); err != nil {
 			return
 		}
-		info := make([]*IdChanInfo, num)
-		for i := 0; i < num; i++ {
-			ici := new(IdChanInfo)
-			ici.Id, _ = dummyId.Clone()
-			if err = jm.Decode(ici.Id); err != nil {
-				return
+		if num > 0 {
+			info := make([]*IdChanInfo, num)
+			for i := 0; i < num; i++ {
+				ici := new(IdChanInfo)
+				ici.Id, _ = dummyId.Clone()
+				if err = jm.Decode(ici.Id); err != nil {
+					return
+				}
+				ici.ElemType = new(chanElemTypeData)
+				if err = jm.Decode(ici.ElemType); err != nil {
+					return
+				}
+				info[i] = ici
 			}
-			ici.ElemType = new(chanElemTypeData)
-			if err = jm.Decode(ici.ElemType); err != nil {
-				return
-			}
-			info[i] = ici
+			e1.Info = info
+		} else {
+			e1.Info = nil
 		}
-		e1.Info = info
 		return
 	default:
 		err = os.ErrorString("jsonDemarshaler: Invalid Sys Msg Type")

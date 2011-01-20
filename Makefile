@@ -7,7 +7,8 @@ TARG=router
 GOFILES=\
 	router.go\
 	id.go\
-	endpoint.go\
+	chans.go\
+	routedchan.go\
 	dispatcher.go\
 	notifier.go\
 	proxy.go\

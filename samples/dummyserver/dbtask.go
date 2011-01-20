@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -155,7 +155,7 @@ func (dt *DbTask) handleDbReq(req *DbReq) {
 					dt.Raise(os.ErrorString("DbTask got an error"))
 				}
 			}
-		} else {  //return empty string "" telling client we are standby
+		} else { //return empty string "" telling client we are standby
 			ch <- ""
 		}
 	}

@@ -1,13 +1,14 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
 
 /*
-"router" is a Go package for remote channel communication, based on peer-peer pub/sub model.
-Basically we attach a send channel to an id in router to send messages, and attach a recv channel to
-an id to receive messages. If these 2 ids match, the messages from send channel will be "routed" to recv channel, e.g.
+"router" is a Go package for peer-peer pub/sub message passing. 
+The basic usage is to attach a send channel to an id in router to send messages, 
+and attach a recv channel to an id to receive messages. If these 2 ids match, 
+the messages from send channel will be "routed" to recv channel, e.g.
 
    rot := router.New(...)
    chan1 := make(chan string)
@@ -39,7 +40,9 @@ const (
 	DefLogBufSize      = 256
 	DefDataChanBufSize = 32
 	DefCmdChanBufSize  = 64
-	DefBindingSetSize  = 8
+	DefBindingSetSize  = 4
+	UnlimitedBuffer    = -1
+	FlowControl        = true
 )
 
 //Router is the main access point to functionality. Applications will create an instance
@@ -50,9 +53,10 @@ type Router interface {
 	//When specified, the optional argument will serve two purposes:
 	//1. used to tell when the remote peers connecting/disconn
 	//2. in AttachRecvChan, used as a flag to ask router to keep recv chan open when all senders close
-	//the returned Endpoint object can be used to find the number of bound peers: endp.NumBindings()
-	AttachSendChan(Id, interface{}, ...interface{}) (*Endpoint, os.Error)
-	AttachRecvChan(Id, interface{}, ...interface{}) (*Endpoint, os.Error)
+	//the returned RoutedChan object can be used to find the number of bound peers: routCh.NumPeers()
+	AttachSendChan(Id, interface{}, ...interface{}) (*RoutedChan, os.Error)
+	//3. When attaching recv chans, an optional integer can specify the internal buffering size
+	AttachRecvChan(Id, interface{}, ...interface{}) (*RoutedChan, os.Error)
 
 	//Detach sendChan/recvChan from router
 	DetachChan(Id, interface{}) os.Error
@@ -64,11 +68,15 @@ type Router interface {
 	//1. internally it calls Proxy.Connect(...) to do the real job
 	//2. The connection can be disconnected by calling Proxy.Close() on returned proxy object
 	//3. for more compilcated connection setup (such as setting IdFilter and IdTranslator), use Proxy.Connect() instead
+
 	//Connect to a local router
 	Connect(Router) (Proxy, Proxy, os.Error)
 
 	//Connect to a remote router thru io conn
-	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy) (Proxy, os.Error)
+	//1. io.ReadWriteCloser: transport connection
+	//2. MarshalingPolicy: gob or json marshaling
+	//3. bool flag: turn on flow control on connection
+	ConnectRemote(io.ReadWriteCloser, MarshalingPolicy, ...bool) (Proxy, os.Error)
 
 	//--- other utils ---
 	//return pre-created SysIds according to the router's id-type, with ScopeGlobal / MemberLocal
@@ -88,11 +96,12 @@ type Router interface {
 type tblEntry struct {
 	chanType *reflect.ChanType
 	id       Id
-	senders  map[interface{}]*Endpoint
-	recvers  map[interface{}]*Endpoint
+	senders  map[interface{}]*RoutedChan
+	recvers  map[interface{}]*RoutedChan
 }
 
 type routerImpl struct {
+	async          bool
 	defChanBufSize int
 	dispPolicy     DispatchPolicy
 	seedId         Id
@@ -103,7 +112,9 @@ type routerImpl struct {
 	sysIds         [NumSysInternalIds]Id
 	notifier       *notifier
 	proxLock       sync.Mutex
-	proxies        *vector.Vector
+	proxies        vector.Vector
+	bufSizeLock    sync.Mutex
+	recvBufSizes   map[interface{}]int
 	//for log/debug, if name != nil, debug is enabled
 	Logger
 	LogSink
@@ -165,25 +176,22 @@ func (s *routerImpl) validateId(id Id) (err os.Error) {
 	return
 }
 
-func (s *routerImpl) validateChan(v interface{}) (ch *reflect.ChanValue, err os.Error) {
-	ch, ok := reflect.NewValue(v).(*reflect.ChanValue)
-	if !ok {
-		err = os.ErrorString(errInvalidChan)
-	}
-	return
-}
-
-func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (endp *Endpoint, err os.Error) {
+func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (routCh *RoutedChan, err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	ch, err := s.validateChan(v)
-	if err != nil {
-		s.LogError(err)
-		s.Raise(err)
-		return
+	var ok bool
+	ch, internalChan := v.(Channel)
+	if !internalChan {
+		ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+		if !ok {
+			err = os.ErrorString(errInvalidChan)
+			s.LogError(err)
+			s.Raise(err)
+			return
+		}
 	}
 	l := len(args)
 	var bindChan chan *BindEvent
@@ -204,8 +212,9 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (
 			return
 		}
 	}
-	endp = newEndpoint(id, senderType, ch, bindChan)
-	err = s.attach(endp)
+	routCh = newRoutedChan(id, senderType, ch, s, bindChan)
+	routCh.internalChan = internalChan
+	err = s.attach(routCh)
 	if err != nil {
 		s.LogError(err)
 		s.Raise(err)
@@ -213,27 +222,25 @@ func (s *routerImpl) AttachSendChan(id Id, v interface{}, args ...interface{}) (
 	return
 }
 
-func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (endp *Endpoint, err os.Error) {
+func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (routCh *RoutedChan, err os.Error) {
 	if err = s.validateId(id); err != nil {
 		s.LogError(err)
 		s.Raise(err)
 		return
 	}
-	var ch reflectChanValue
-	gChan, ok := v.(*genericMsgChan)
-	if ok {
-		ch = gChan
-	} else {
-		ch, err = s.validateChan(v)
-		if err != nil {
+	var ok bool
+	ch, internalChan := v.(Channel)
+	if !internalChan {
+		ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+		if !ok {
+			err = os.ErrorString(errInvalidChan)
 			s.LogError(err)
 			s.Raise(err)
 			return
 		}
 	}
-	l := len(args)
 	var bindChan chan *BindEvent
-	if l > 0 {
+	for i := 0; i < len(args); i++ {
 		switch cv := args[0].(type) {
 		case chan *BindEvent:
 			bindChan = cv
@@ -243,6 +250,14 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (
 				s.Raise(err)
 				return
 			}
+		case int:
+			//set recv chan buffer size
+			s.bufSizeLock.Lock()
+			old, ok := s.recvBufSizes[id.Key()]
+			if !ok || old < cv {
+				s.recvBufSizes[id.Key()] = cv
+			}
+			s.bufSizeLock.Unlock()
 		default:
 			err = os.ErrorString("invalid arguments to attach recv chan")
 			s.LogError(err)
@@ -250,11 +265,14 @@ func (s *routerImpl) AttachRecvChan(id Id, v interface{}, args ...interface{}) (
 			return
 		}
 	}
-	endp = newEndpoint(id, recverType, ch, bindChan)
-	if gChan != nil {
-		endp.genFlag = true
+	if s.async && ch.Cap() != UnlimitedBuffer && !internalChan {
+		//for async router, external recv chans must have unlimited buffering, 
+		//ie. Cap()==-1, all undelivered msgs will be buffered right before ext recv chans
+		ch = &asyncChan{Channel: ch}
 	}
-	err = s.attach(endp)
+	routCh = newRoutedChan(id, recverType, ch, s, bindChan)
+	routCh.internalChan = internalChan
+	err = s.attach(routCh)
 	if err != nil {
 		s.LogError(err)
 		s.Raise(err)
@@ -269,22 +287,21 @@ func (s *routerImpl) DetachChan(id Id, v interface{}) (err os.Error) {
 		s.Raise(err)
 		return
 	}
-	var ch reflectChanValue
-	gChan, ok := v.(*genericMsgChan)
-	if ok {
-		ch = gChan
-	} else {
-		ch, err = s.validateChan(v)
-		if err != nil {
+	ch, ok := v.(Channel)
+	if !ok {
+		ch, ok = reflect.NewValue(v).(*reflect.ChanValue)
+		if !ok {
+			err = os.ErrorString(errInvalidChan)
 			s.LogError(err)
 			s.Raise(err)
 			return
 		}
 	}
-	endp := &Endpoint{}
-	endp.Id = id
-	endp.Chan = ch
-	err = s.detach(endp)
+	routCh := &RoutedChan{}
+	routCh.Id = id
+	routCh.Channel = ch
+	routCh.router = s
+	err = s.detach(routCh)
 	return
 }
 
@@ -293,34 +310,34 @@ func (s *routerImpl) Close() {
 	s.shutdown()
 }
 
-func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
+func (s *routerImpl) attach(routCh *RoutedChan) (err os.Error) {
 	//handle id
-	if reflect.Typeof(endp.Id) != s.idType {
-		err = os.ErrorString(errIdTypeMismatch + ": " + endp.Id.String())
+	if reflect.Typeof(routCh.Id) != s.idType {
+		err = os.ErrorString(errIdTypeMismatch + ": " + routCh.Id.String())
 		s.LogError(err)
 		return
 	}
 
 	s.tblLock.Lock()
 	//router entry
-	ent, ok := s.routingTable[endp.Id.Key()]
+	ent, ok := s.routingTable[routCh.Id.Key()]
 	if !ok {
-		if endp.genFlag {
-			err = os.ErrorString(fmt.Sprintf("%s %v", errChanGenericType, endp.Id))
+		if routCh.internalChan {
+			err = os.ErrorString(fmt.Sprintf("%s %v", errChanGenericType, routCh.Id))
 			s.LogError(err)
 			s.tblLock.Unlock()
 			return
 		}
-		//first endpoint attached to this id, add a router-entry for this id
+		//first routedChan attached to this id, add a router-entry for this id
 		ent = &tblEntry{}
-		s.routingTable[endp.Id.Key()] = ent
-		ent.id = endp.Id // will only use the Val/Match() part of id
-		ent.chanType = endp.Chan.Type().(*reflect.ChanType)
-		ent.senders = make(map[interface{}]*Endpoint)
-		ent.recvers = make(map[interface{}]*Endpoint)
+		s.routingTable[routCh.Id.Key()] = ent
+		ent.id = routCh.Id // will only use the Val/Match() part of id
+		ent.chanType = routCh.Channel.Type().(*reflect.ChanType)
+		ent.senders = make(map[interface{}]*RoutedChan)
+		ent.recvers = make(map[interface{}]*RoutedChan)
 	} else {
-		if !endp.genFlag && endp.Chan.Type().(*reflect.ChanType) != ent.chanType {
-			err = os.ErrorString(fmt.Sprintf("%s %v", errChanTypeMismatch, endp.Id))
+		if !routCh.internalChan && routCh.Channel.Type().(*reflect.ChanType) != ent.chanType {
+			err = os.ErrorString(fmt.Sprintf("%s %v", errChanTypeMismatch, routCh.Id))
 			s.LogError(err)
 			s.tblLock.Unlock()
 			return
@@ -328,71 +345,71 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 	}
 
 	//check for duplicate
-	switch endp.kind {
+	switch routCh.kind {
 	case senderType:
-		if _, ok = ent.senders[endp.Chan.Interface()]; ok {
+		if _, ok = ent.senders[routCh.Channel.Interface()]; ok {
 			err = os.ErrorString(errDupAttachment)
 			s.LogError(err)
 			s.tblLock.Unlock()
 			return
 		} else {
-			ent.senders[endp.Chan.Interface()] = endp
+			ent.senders[routCh.Channel.Interface()] = routCh
 		}
 	case recverType:
-		if _, ok = ent.recvers[endp.Chan.Interface()]; ok {
+		if _, ok = ent.recvers[routCh.Channel.Interface()]; ok {
 			err = os.ErrorString(errDupAttachment)
 			s.LogError(err)
 			s.tblLock.Unlock()
 			return
 		} else {
-			ent.recvers[endp.Chan.Interface()] = endp
+			ent.recvers[routCh.Channel.Interface()] = routCh
 		}
 	}
 
-	idx := endp.Id.SysIdIndex()
-	matches := new(vector.Vector)
+	idx := routCh.Id.SysIdIndex()
+	var matches vector.Vector
 
-	//find bindings for endpoint
+	//find bindings for routedChan
 	if s.matchType == ExactMatch {
-		switch endp.kind {
+		switch routCh.kind {
 		case senderType:
 			for _, recver := range ent.recvers {
-				if scope_match(endp.Id, recver.Id) {
-					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", endp.Id, recver.Id))
+				if scope_match(routCh.Id, recver.Id) {
+					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", routCh.Id, recver.Id))
 					matches.Push(recver)
 				}
 			}
 		case recverType:
 			for _, sender := range ent.senders {
-				if scope_match(sender.Id, endp.Id) {
-					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
+				if scope_match(sender.Id, routCh.Id) {
+					s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, routCh.Id))
 					matches.Push(sender)
 				}
 			}
 		}
 	} else { //for PrefixMatch & AssocMatch, need to iterate thru all entries in map routingTable
 		for _, ent2 := range s.routingTable {
-			if endp.Id.Match(ent2.id) {
-				if endp.Chan.Type().(*reflect.ChanType) == ent2.chanType ||
-					(endp.kind == recverType && endp.genFlag) {
-					switch endp.kind {
+			if routCh.Id.Match(ent2.id) {
+				if routCh.Channel.Type().(*reflect.ChanType) == ent2.chanType ||
+					(routCh.kind == recverType && routCh.internalChan) {
+					switch routCh.kind {
 					case senderType:
 						for _, recver := range ent2.recvers {
-							if scope_match(endp.Id, recver.Id) {
-								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", endp.Id, recver.Id))
+							if scope_match(routCh.Id, recver.Id) {
+								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", routCh.Id, recver.Id))
 								matches.Push(recver)
 							}
 						}
 					case recverType:
 						for _, sender := range ent2.senders {
-							if scope_match(sender.Id, endp.Id) {
-								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, endp.Id))
+							if scope_match(sender.Id, routCh.Id) {
+								s.Log(LOG_INFO, fmt.Sprintf("add bindings: %v -> %v", sender.Id, routCh.Id))
 								matches.Push(sender)
 							}
 						}
 					}
 				} else {
-					em := os.ErrorString(fmt.Sprintf("%s : [%v, %v]", errChanTypeMismatch, endp.Id, ent2.id))
+					em := os.ErrorString(fmt.Sprintf("%s : [%v, %v]", errChanTypeMismatch, routCh.Id, ent2.id))
 					s.Log(LOG_ERROR, em)
 					//should crash here?
 					s.Raise(em)
@@ -406,37 +423,37 @@ func (s *routerImpl) attach(endp *Endpoint) (err os.Error) {
 	//activate
 	//force broadcaster for system ids
 	if idx >= 0 { //sys ids
-		endp.start(s.defChanBufSize, BroadcastPolicy)
+		routCh.start(BroadcastPolicy)
 	} else {
-		endp.start(s.defChanBufSize, s.dispPolicy)
+		routCh.start(s.dispPolicy)
 	}
 
 	//finished updating routing table
-	//start updating endpoints's binding_set
+	//start updating routedChans's binding_set
 	for i := 0; i < matches.Len(); i++ {
-		peer := matches.At(i).(*Endpoint)
-		endp.attach(peer)
-		peer.attach(endp)
+		peer := matches[i].(*RoutedChan)
+		routCh.attach(peer)
+		peer.attach(routCh)
 	}
 
 	//notifier will send in a separate goroutine, so non-blocking here
-	if idx < 0 && endp.Id.Member() == MemberLocal { //not sys ids
-		switch endp.kind {
+	if idx < 0 && routCh.Id.Member() == MemberLocal { //not sys ids
+		switch routCh.kind {
 		case senderType:
-			s.notifier.notifyPub(&IdChanInfo{Id: endp.Id, ChanType: endp.Chan.Type().(*reflect.ChanType)})
+			s.notifier.notifyPub(&IdChanInfo{Id: routCh.Id, ChanType: routCh.Channel.Type().(*reflect.ChanType)})
 		case recverType:
-			s.notifier.notifySub(&IdChanInfo{Id: endp.Id, ChanType: endp.Chan.Type().(*reflect.ChanType)})
+			s.notifier.notifySub(&IdChanInfo{Id: routCh.Id, ChanType: routCh.Channel.Type().(*reflect.ChanType)})
 		}
 	}
 	return
 }
 
-func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
-	s.Log(LOG_INFO, fmt.Sprintf("detach chan from id %v\n", endp.Id))
+func (s *routerImpl) detach(routCh *RoutedChan) (err os.Error) {
+	s.Log(LOG_INFO, fmt.Sprintf("detach chan from id %v\n", routCh.Id))
 
 	//check id
-	if reflect.Typeof(endp.Id) != s.idType {
-		err = os.ErrorString(errIdTypeMismatch + ": " + endp.Id.String())
+	if reflect.Typeof(routCh.Id) != s.idType {
+		err = os.ErrorString(errIdTypeMismatch + ": " + routCh.Id.String())
 		s.LogError(err)
 		return
 	}
@@ -444,22 +461,22 @@ func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
 	s.tblLock.Lock()
 
 	//find router entry
-	ent, ok := s.routingTable[endp.Id.Key()]
+	ent, ok := s.routingTable[routCh.Id.Key()]
 	if !ok {
-		err = os.ErrorString(errDetachChanNotInRouter + ": " + endp.Id.String())
+		err = os.ErrorString(errDetachChanNotInRouter + ": " + routCh.Id.String())
 		s.LogError(err)
 		s.tblLock.Unlock()
 		return
 	}
 
-	//find the endpoint & remove it from tblEntry
-	endp1, ok := ent.senders[endp.Chan.Interface()]
+	//find the routedChan & remove it from tblEntry
+	routCh1, ok := ent.senders[routCh.Channel.Interface()]
 	if ok {
-		ent.senders[endp.Chan.Interface()] = endp1, false
-	} else if endp1, ok = ent.recvers[endp.Chan.Interface()]; ok {
-		ent.recvers[endp.Chan.Interface()] = endp1, false
+		ent.senders[routCh.Channel.Interface()] = routCh1, false
+	} else if routCh1, ok = ent.recvers[routCh.Channel.Interface()]; ok {
+		ent.recvers[routCh.Channel.Interface()] = routCh1, false
 	} else {
-		err = os.ErrorString(errDetachChanNotInRouter + ": " + endp.Id.String())
+		err = os.ErrorString(errDetachChanNotInRouter + ": " + routCh.Id.String())
 		s.LogError(err)
 		s.tblLock.Unlock()
 		return
@@ -468,30 +485,27 @@ func (s *routerImpl) detach(endp *Endpoint) (err os.Error) {
 	s.tblLock.Unlock()
 
 	//remove bindings from peers. dup bindings to avoid race at shutdown
-	endp1.bindLock.Lock()
-	copySet := make([]*Endpoint, len(endp1.bindings))
-	copy(copySet, endp1.bindings)
-	endp1.bindLock.Unlock()
+	copySet := routCh1.Peers()
 	for _, v := range copySet {
-		if endp1.kind == senderType {
-			s.Log(LOG_INFO, fmt.Sprintf("del bindings: %v -> %v", endp1.Id, v.Id))
+		if routCh1.kind == senderType {
+			s.Log(LOG_INFO, fmt.Sprintf("del bindings: %v -> %v", routCh1.Id, v.Id))
 		} else {
-			s.Log(LOG_INFO, fmt.Sprintf("del bindings: %v -> %v", v.Id, endp1.Id))
+			s.Log(LOG_INFO, fmt.Sprintf("del bindings: %v -> %v", v.Id, routCh1.Id))
 		}
-		v.detach(endp1)
+		v.detach(routCh1)
 	}
 
-	//close endpoint's chans, so any goroutines waiting on them will exit
-	endp1.close()
+	//close routedChan's chans, so any goroutines waiting on them will exit
+	routCh1.close()
 
 	//notifier will send in a separate goroutine, so non-blocking here
-	idx := endp1.Id.SysIdIndex()
-	if idx < 0 && endp.Id.Member() == MemberLocal { //not sys ids
-		switch endp.kind {
+	idx := routCh1.Id.SysIdIndex()
+	if idx < 0 && routCh.Id.Member() == MemberLocal { //not sys ids
+		switch routCh.kind {
 		case senderType:
-			s.notifier.notifyUnPub(&IdChanInfo{Id: endp1.Id, ChanType: endp1.Chan.Type().(*reflect.ChanType)})
+			s.notifier.notifyUnPub(&IdChanInfo{Id: routCh1.Id, ChanType: routCh1.Channel.Type().(*reflect.ChanType)})
 		case recverType:
-			s.notifier.notifyUnSub(&IdChanInfo{Id: endp1.Id, ChanType: endp1.Chan.Type().(*reflect.ChanType)})
+			s.notifier.notifyUnSub(&IdChanInfo{Id: routCh1.Id, ChanType: routCh1.Channel.Type().(*reflect.ChanType)})
 		}
 	}
 
@@ -508,7 +522,7 @@ func (s *routerImpl) shutdown() {
 
 	// close all peers
 	for i := 0; i < s.proxies.Len(); i++ {
-		s.proxies.At(i).(Proxy).Close()
+		s.proxies[i].(Proxy).Close()
 	}
 	s.Log(LOG_INFO, "all proxy closed")
 
@@ -537,6 +551,16 @@ func (s *routerImpl) initSysIds() {
 	}
 }
 
+func (s *routerImpl) recvChanBufSize(id Id) int {
+	s.bufSizeLock.Lock()
+	defer s.bufSizeLock.Unlock()
+	v, ok := s.recvBufSizes[id.Key()]
+	if ok {
+		return v
+	}
+	return s.defChanBufSize
+}
+
 func (s *routerImpl) addProxy(p Proxy) {
 	s.Log(LOG_INFO, "add proxy")
 	s.proxLock.Lock()
@@ -549,7 +573,7 @@ func (s *routerImpl) delProxy(p Proxy) {
 	num := -1
 	s.proxLock.Lock()
 	for i := 0; i < s.proxies.Len(); i++ {
-		if s.proxies.At(i).(Proxy) == p {
+		if s.proxies[i].(Proxy) == p {
 			num = i
 			break
 		}
@@ -568,17 +592,19 @@ func (r1 *routerImpl) Connect(r2 Router) (p1, p2 Proxy, err os.Error) {
 	return
 }
 
-func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy) (p Proxy, err os.Error) {
+func (r *routerImpl) ConnectRemote(rwc io.ReadWriteCloser, mar MarshalingPolicy, flags ...bool) (p Proxy, err os.Error) {
 	p = NewProxy(r, "", nil, nil)
-	err = p.ConnectRemote(rwc, mar)
+	err = p.ConnectRemote(rwc, mar, flags...)
 	return
 }
 
 /*
 New is router constructor. It accepts the following arguments:
     1. seedId: a dummy id to show what type of ids will be used. New ids will be type-checked against this.
-    2. bufSize: by default, 32 is the default size for router's internal channels.
-                if bufSize > 0, its value will be used.
+    2. bufSize: the buffer size used for router's internal channels.
+           if bufSize >= 0, its value will be used
+           if bufSize < 0, it means unlimited buffering, so router is async and sending on 
+                                attached channels will never block
     3. disp: dispatch policy for router. by default, it is BroadcastPolicy
     4. optional arguments ...:
             name:     router's name, if name is defined, router internal logging will be turned on,
@@ -617,12 +643,14 @@ func New(seedId Id, bufSize int, disp DispatchPolicy, args ...interface{}) Route
 	router.matchType = router.seedId.MatchType()
 	router.initSysIds()
 	router.defChanBufSize = DefDataChanBufSize
-	if bufSize > 0 {
+	if bufSize >= 0 {
 		router.defChanBufSize = bufSize
+	} else {
+		router.async = true
 	}
 	router.dispPolicy = disp
 	router.routingTable = make(map[interface{}](*tblEntry))
-	router.proxies = new(vector.Vector)
+	router.recvBufSizes = make(map[interface{}]int)
 	router.notifier = newNotifier(router)
 	router.Logger.Init(router.SysID(RouterLogId), router, router.name)
 	if consoleLogScope >= ScopeGlobal && consoleLogScope <= ScopeLocal {

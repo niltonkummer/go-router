@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2010 Yigong Liu
+// Copyright (c) 2010 - 2011 Yigong Liu
 //
 // Distributed under New BSD License
 //
@@ -76,7 +76,7 @@ type Id interface {
 	//Generators for creating other ids of same type. Since often we don't
 	//know the exact types of Id.Val, so we have to create new ones from an existing id
 	SysID(int, ...int) (Id, os.Error) //generate sys ids, also called as method of Router
-	SysIdIndex() int //return (0 - NumSysInternalIds) for SysIds, return -1 for others
+	SysIdIndex() int                  //return (0 - NumSysInternalIds) for SysIds, return -1 for others
 	Clone(...int) (Id, os.Error)      //create a new id with same id, but possible diff scope & membership
 
 	//Stringer interface
@@ -85,10 +85,10 @@ type Id interface {
 
 //Indices for sys msgs, used for creating SysIds
 const (
-	RouterConnId = iota
-	RouterDisconnId
-	ConnErrorId
-	ConnReadyId
+	ConnId = iota
+	DisconnId
+	ErrorId
+	ReadyId
 	PubId
 	UnPubId
 	SubId
@@ -411,9 +411,9 @@ var (
 
 /*
  IntId constructor, accepting the following arguments:
-    Val       int
-    ScopeVal  int
-    MemberVal int
+ Val       int
+ ScopeVal  int
+ MemberVal int
 */
 func IntID(args ...interface{}) Id {
 	l := len(args)
@@ -435,7 +435,7 @@ func IntID(args ...interface{}) Id {
 	}
 	if l > 2 {
 		if iv, ok = args[2].(int); ok {
-			id.MemberVal = iv 
+			id.MemberVal = iv
 		} else {
 			return nil
 		}
@@ -445,9 +445,9 @@ func IntID(args ...interface{}) Id {
 
 /*
  StrId constructor, accepting the following arguments:
-    Val       string
-    ScopeVal  int
-    MemberVal int
+ Val       string
+ ScopeVal  int
+ MemberVal int
 */
 func StrID(args ...interface{}) Id {
 	l := len(args)
@@ -455,7 +455,7 @@ func StrID(args ...interface{}) Id {
 		return DummyStrId
 	}
 	id := &StrId{}
-	sv, ok :=args[0].(string)
+	sv, ok := args[0].(string)
 	if !ok {
 		return nil
 	}
@@ -472,7 +472,7 @@ func StrID(args ...interface{}) Id {
 	}
 	if l > 2 {
 		if iv, ok := args[2].(int); ok {
-			id.MemberVal = iv 
+			id.MemberVal = iv
 		} else {
 			return nil
 		}
@@ -482,9 +482,9 @@ func StrID(args ...interface{}) Id {
 
 /*
  PathId constructor, accepting the following arguments:
-    Val       string (path names, such as /sport/basketball/news/...)
-    ScopeVal  int
-    MemberVal int
+ Val       string (path names, such as /sport/basketball/news/...)
+ ScopeVal  int
+ MemberVal int
 */
 func PathID(args ...interface{}) Id {
 	l := len(args)
@@ -509,7 +509,7 @@ func PathID(args ...interface{}) Id {
 	}
 	if l > 2 {
 		if iv, ok := args[2].(int); ok {
-			id.MemberVal = iv 
+			id.MemberVal = iv
 		} else {
 			return nil
 		}
@@ -519,10 +519,10 @@ func PathID(args ...interface{}) Id {
 
 /*
  MsgId constructor, accepting the following arguments:
-    Family    int
-    Tag       int
-    ScopeVal  int
-    MemberVal int
+ Family    int
+ Tag       int
+ ScopeVal  int
+ MemberVal int
 */
 func MsgID(args ...interface{}) Id {
 	l := len(args)
@@ -553,7 +553,7 @@ func MsgID(args ...interface{}) Id {
 	}
 	if l > 3 {
 		if iv, ok = args[3].(int); ok {
-			id.MemberVal = iv 
+			id.MemberVal = iv
 		} else {
 			return nil
 		}

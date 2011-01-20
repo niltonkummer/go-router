@@ -11,7 +11,7 @@ var showPingPong bool = true
 
 //Msg instances are bounced between Pinger and Ponger as balls
 type Msg struct {
-	Data string
+	Data  string
 	Count int
 }
 
@@ -33,7 +33,7 @@ func (p *Pinger) Run() {
 		if v.Count > p.numRuns {
 			break
 		}
-		p.pingChan <- &Msg{"hello from Pinger", v.Count+1}
+		p.pingChan <- &Msg{"hello from Pinger", v.Count + 1}
 	}
 	close(p.pingChan)
 	p.done <- true
@@ -60,12 +60,12 @@ type Ponger struct {
 }
 
 func (p *Ponger) Run() {
-	p.pongChan <- &Msg{"hello from Ponger", 0}  //initiate ping-pong
+	p.pongChan <- &Msg{"hello from Ponger", 0} //initiate ping-pong
 	for v := range p.pingChan {
 		if showPingPong {
 			fmt.Println("Ponger recv: ", v)
 		}
-		p.pongChan <- &Msg{"hello from Ponger", v.Count+1}
+		p.pongChan <- &Msg{"hello from Ponger", v.Count + 1}
 	}
 	close(p.pongChan)
 	p.done <- true
@@ -75,17 +75,8 @@ func newPonger(rot router.Router, done chan<- bool) {
 	//attach chans to router
 	pingChan := make(chan *Msg)
 	pongChan := make(chan *Msg)
-	bindChan := make(chan *router.BindEvent, 1)
-	rot.AttachSendChan(router.StrID("pong"), pongChan, bindChan)
+	rot.AttachSendChan(router.StrID("pong"), pongChan)
 	rot.AttachRecvChan(router.StrID("ping"), pingChan)
-	//wait for pinger connecting
-	/*
-	for {
-		if (<-bindChan).Count > 0 {
-			break
-		}
-	}
-	 */
 	//start ponger
 	pong := &Ponger{pongChan, pingChan, done}
 	go pong.Run()
