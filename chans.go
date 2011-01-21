@@ -20,7 +20,7 @@ import (
  add some utility Channel types
 */
 type Channel interface {
-	chanState
+	ChanState
 	Sender
 	Recver
 }
@@ -38,7 +38,7 @@ type Recver interface {
 }
 
 //basic chan state
-type chanState interface {
+type ChanState interface {
 	Type() reflect.Type
 	Interface() interface{}
 	IsNil() bool
@@ -50,13 +50,13 @@ type chanState interface {
 
 //SendChan: sending end of Channel (chan<-)
 type SendChan interface {
-	chanState
+	ChanState
 	Sender
 }
 
 //RecvChan: recving end of Channel (<-chan)
 type RecvChan interface {
-	chanState
+	ChanState
 	Recver
 }
 
